@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:projectrack1/providers/auth_provider.dart';
+import 'package:projectrack1/providers/drift_database_provider.dart';
 import 'package:projectrack1/providers/theme_provider.dart';
 import 'package:projectrack1/routes/app_routes.dart';
 import 'package:projectrack1/themes/app_colors.dart';
@@ -57,10 +58,30 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _navigateToOnboarding() async {
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
     final auth = Provider.of<AuthProvider>(context, listen: false);
+    final started = DateTime.now();
+    const minSplash = Duration(milliseconds: 1200);
+    const maxWait = Duration(seconds: 12);
+
+    // Wait until auth session is resolved (avoid racing splash vs secure storage)
+    while (mounted &&
+        (auth.status == AuthStatus.initial || auth.status == AuthStatus.loading) &&
+        DateTime.now().difference(started) < maxWait) {
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+
+    if (!mounted) return;
+    final elapsed = DateTime.now().difference(started);
+    if (elapsed < minSplash) {
+      await Future.delayed(minSplash - elapsed);
+    }
+    if (!mounted) return;
+
     if (auth.isAuthenticated) {
+      final uid = auth.currentUser?.id;
+      if (uid != null) {
+        Provider.of<DriftDatabaseProvider>(context, listen: false).setActiveUserId(uid);
+      }
       context.go(AppRoutes.home);
     } else {
       context.go(AppRoutes.onboarding);

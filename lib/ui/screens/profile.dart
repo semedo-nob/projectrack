@@ -8,10 +8,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:projectrack1/providers/auth_provider.dart';
 import 'package:projectrack1/providers/theme_provider.dart';
+import 'package:projectrack1/providers/drift_database_provider.dart';
 import 'package:projectrack1/utils/avatar_image.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 
 import '../../routes/app_routes.dart';
+import '../widgets/enterprise_ui.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -21,17 +24,75 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  bool _notificationsEnabled = true;
   bool _emailUpdatesEnabled = true;
 
   // Theme selection
   late AppThemeMode _selectedThemeMode;
+
+  // Stats data
+  int _projectCount = 0;
+  int _receiptCount = 0;
+  int _taskCount = 0;
+  bool _isLoadingStats = true;
 
   @override
   void initState() {
     super.initState();
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     _selectedThemeMode = themeProvider.appThemeMode;
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    setState(() => _isLoadingStats = true);
+    try {
+      final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+
+      // Get all projects count
+      final projects = await db.getAllProjects();
+
+      // Get all receipts count (expenses with images)
+      int receiptCount = 0;
+      for (final project in projects) {
+        final expenses = await db.getExpensesByProject(project.id);
+        receiptCount += expenses.where((e) => e.hasReceipt).length;
+      }
+
+      final taskCount = await db.countTasksForProjects(projects.map((p) => p.id).toList());
+
+      if (mounted) {
+        setState(() {
+          _projectCount = projects.length;
+          _receiptCount = receiptCount;
+          _taskCount = taskCount;
+          _isLoadingStats = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingStats = false);
+      }
+    }
+  }
+
+  void _showInfoDialog({
+    required String title,
+    required String message,
+    String buttonLabel = 'Close',
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showEditProfileSheet(BuildContext context, bool isDark) {
@@ -231,44 +292,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final auth = Provider.of<AuthProvider>(context);
     final isDark = themeProvider.isDarkMode(context);
-    final theme = Theme.of(context);
     final user = auth.currentUser;
     final displayName = user?.name ?? 'User';
     final displayEmail = user?.email ?? '—';
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: EnterpriseUi.screenBg(isDark),
       body: CustomScrollView(
         slivers: [
-          // Simple App Bar
           SliverAppBar(
-            expandedHeight: 0,
             floating: true,
             pinned: true,
-            backgroundColor: Colors.transparent,
             elevation: 0,
-            leading: Container(
-              margin: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isDark
-                    ? Colors.white.withOpacity(0.1)
-                    : Colors.black.withOpacity(0.05),
+            scrolledUnderElevation: 0,
+            surfaceTintColor: Colors.transparent,
+            backgroundColor: EnterpriseUi.appBarBg(isDark),
+            leading: IconButton(
+              icon: Icon(
+                Icons.arrow_back_rounded,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
               ),
-              child: IconButton(
-                icon: Icon(
-                  Icons.arrow_back_rounded,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                  size: 20,
-                ),
-                onPressed: () => context.go(AppRoutes.home),
-              ),
+              onPressed: () => context.go(AppRoutes.home),
             ),
             title: Text(
               'Profile',
               style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
+                fontSize: 18,
                 color: isDark ? AppColors.darkText : AppColors.lightText,
               ),
             ),
@@ -278,22 +328,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // Profile Header
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              padding: const EdgeInsets.fromLTRB(EnterpriseUi.padH, 12, EnterpriseUi.padH, 8),
               child: _buildProfileHeader(isDark, displayName, displayEmail, user?.avatarUrl),
             ),
           ),
 
           // Stats Section
           SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: EnterpriseUi.padH),
             sliver: SliverToBoxAdapter(
-              child: _buildStatsGrid(isDark),
+              child: _isLoadingStats
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildStatsGrid(isDark),
             ),
           ),
 
           // Settings Sections
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+            padding: const EdgeInsets.fromLTRB(EnterpriseUi.padH, 16, EnterpriseUi.padH, 100),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 const SizedBox(height: 8),
@@ -323,7 +375,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   iconColor: AppColors.info,
                   title: 'Email Preferences',
                   subtitle: 'Manage email notifications',
-                  onTap: () {},
+                  onTap: () => context.push(AppRoutes.settings),
                 ),
 
                 const SizedBox(height: 24),
@@ -339,16 +391,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   subtitle: 'Currency, notifications & more',
                   onTap: () => context.push(AppRoutes.settings),
                 ),
-                _buildSwitchItem(
-                  isDark: isDark,
-                  icon: Icons.notifications_outlined,
-                  iconColor: AppColors.warning,
-                  title: 'Push Notifications',
-                  value: _notificationsEnabled,
-                  onChanged: (value) => setState(() => _notificationsEnabled = value),
-                ),
 
-                // Theme Dropdown (replacing dark mode switch)
+                // Theme Dropdown
                 _buildThemeDropdown(isDark, themeProvider),
 
                 _buildSwitchItem(
@@ -371,7 +415,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   iconColor: AppColors.info,
                   title: 'Help Center',
                   subtitle: 'Get help with using the app',
-                  onTap: () {},
+                  onTap: () => _showInfoDialog(
+                    title: 'Help Center',
+                    message:
+                        'Need help?\n\n1. Create or open a project.\n2. Add daily material entries or upload receipts.\n3. Use Reports for spending insights.\n4. Open Settings for backup, export, and security.',
+                  ),
                 ),
                 _buildSettingsItem(
                   isDark: isDark,
@@ -379,7 +427,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   iconColor: AppColors.primary,
                   title: 'Terms of Service',
                   subtitle: 'Read our terms and conditions',
-                  onTap: () {},
+                  onTap: () => _showInfoDialog(
+                    title: 'Terms of Service',
+                    message:
+                        'ProjectRack stores your data locally on device and can back it up to your connected Google account when enabled. You are responsible for the accuracy of project records and exported reports.',
+                  ),
                 ),
                 _buildSettingsItem(
                   isDark: isDark,
@@ -387,7 +439,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   iconColor: AppColors.secondary,
                   title: 'Privacy Policy',
                   subtitle: 'Learn how we handle your data',
-                  onTap: () {},
+                  onTap: () => _showInfoDialog(
+                    title: 'Privacy Policy',
+                    message:
+                        'Project data stays on your device unless you choose Backup & Export actions. Biometric authentication only protects local app access on this device.',
+                  ),
                 ),
 
                 const SizedBox(height: 24),
@@ -516,6 +572,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showProfilePhotoOptions(BuildContext context, bool isDark) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -553,16 +610,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _pickAndSaveProfilePhoto(context, ImageSource.gallery);
               },
             ),
+            if (auth.currentUser?.avatarUrl != null)
+              ListTile(
+                leading: const Icon(Icons.delete_rounded, color: AppColors.error),
+                title: const Text('Remove photo'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _removeProfilePhoto();
+                },
+              ),
           ],
         ),
       ),
     );
   }
 
+  Future<void> _removeProfilePhoto() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final ok = await auth.updateProfile(avatarUrl: null);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok ? 'Profile photo removed' : 'Failed to remove photo'),
+          backgroundColor: ok ? AppColors.success : AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _pickAndSaveProfilePhoto(BuildContext context, ImageSource source) async {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final user = auth.currentUser;
     if (user == null) return;
+
     if (source == ImageSource.camera) {
       final status = await Permission.camera.request();
       if (!status.isGranted) {
@@ -574,6 +655,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
     }
+
     final picker = ImagePicker();
     final XFile? picked = await picker.pickImage(
       source: source,
@@ -581,14 +663,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
       maxHeight: 512,
       imageQuality: 85,
     );
+
     if (picked == null || !context.mounted) return;
+
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
       final dir = await getApplicationDocumentsDirectory();
       final profileDir = Directory('${dir.path}/profile_photos');
       if (!await profileDir.exists()) await profileDir.create(recursive: true);
-      final path = '${profileDir.path}/avatar_${user.id}.jpg';
+
+      // Delete old photo if exists
+      if (user.avatarUrl != null) {
+        try {
+          final oldFile = File(user.avatarUrl!);
+          if (await oldFile.exists()) await oldFile.delete();
+        } catch (_) {}
+      }
+
+      final timestamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final path = '${profileDir.path}/avatar_${user.id}_$timestamp.jpg';
       await File(picked.path).copy(path);
-      if (!context.mounted) return;
+
+      if (!context.mounted) {
+        if (mounted) Navigator.pop(context);
+        return;
+      }
+
+      Navigator.pop(context); // Close loading
+
       final ok = await auth.updateProfile(avatarUrl: path);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -601,6 +709,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       if (context.mounted) {
+        Navigator.pop(context); // Close loading
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to save photo: $e'),
@@ -615,41 +724,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildProfileHeader(bool isDark, String displayName, String displayEmail, String? avatarUrl) {
     final imageProvider = avatarImageProvider(avatarUrl);
     final hasImage = imageProvider != null;
+
     return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? AppColors.salamonoShadowDark : AppColors.salamonoShadow,
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.all(16),
+      decoration: EnterpriseUi.cardDecoration(isDark),
       child: Row(
         children: [
           GestureDetector(
             onTap: () => _showProfilePhotoOptions(context, isDark),
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: hasImage ? null : AppColors.primary.withOpacity(0.2),
-                border: Border.all(
-                  color: AppColors.primary,
-                  width: 3,
+            child: Stack(
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: hasImage ? null : AppColors.primary.withOpacity(0.2),
+                    border: Border.all(
+                      color: AppColors.primary,
+                      width: 2,
+                    ),
+                    image: hasImage
+                        ? DecorationImage(
+                            image: imageProvider,
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                  ),
+                  child: hasImage ? null : Icon(Icons.person_rounded, size: 40, color: AppColors.primary),
                 ),
-                image: hasImage
-                    ? DecorationImage(
-                        image: imageProvider!,
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: hasImage ? null : Icon(Icons.person_rounded, size: 40, color: AppColors.primary),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: isDark ? AppColors.darkCard : Colors.white, width: 2),
+                    ),
+                    child: const Icon(
+                      Icons.camera_alt_rounded,
+                      size: 14,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 20),
@@ -662,8 +783,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Text(
                   displayName,
                   style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
                     color: isDark ? AppColors.darkText : AppColors.lightText,
                   ),
                 ),
@@ -675,20 +796,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'Pro Member',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
+                const SizedBox(height: 4),
+                Text(
+                  'Signed in',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
                   ),
                 ),
               ],
@@ -712,37 +825,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildStatsGrid(bool isDark) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 20),
+    const accent = AppColors.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           Expanded(
-            child: _buildStatCard(
-              isDark: isDark,
-              value: '24',
-              label: 'Projects',
-              icon: Icons.folder_rounded,
-              color: AppColors.primary,
+            child: GestureDetector(
+              onTap: () => context.push(AppRoutes.projects),
+              child: _buildStatCard(
+                isDark: isDark,
+                value: '$_projectCount',
+                label: 'Projects',
+                icon: Icons.folder_rounded,
+                color: accent,
+              ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: _buildStatCard(
-              isDark: isDark,
-              value: '156',
-              label: 'Tasks',
-              icon: Icons.task_alt_rounded,
-              color: AppColors.success,
+            child: GestureDetector(
+              onTap: () => context.push(AppRoutes.receiptGallery),
+              child: _buildStatCard(
+                isDark: isDark,
+                value: '$_receiptCount',
+                label: 'Receipts',
+                icon: Icons.receipt_long_rounded,
+                color: accent,
+              ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
-            child: _buildStatCard(
-              isDark: isDark,
-              value: '18',
-              label: 'Team',
-              icon: Icons.people_rounded,
-              color: AppColors.info,
+            child: GestureDetector(
+              onTap: () => context.push(AppRoutes.dailyLogsHistory),
+              child: _buildStatCard(
+                isDark: isDark,
+                value: '$_taskCount',
+                label: 'Tasks',
+                icon: Icons.task_alt_rounded,
+                color: accent,
+              ),
             ),
           ),
         ],
@@ -758,42 +881,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(EnterpriseUi.radiusMd),
         border: Border.all(
           color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
         ),
       ),
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              icon,
-              color: color,
-              size: 20,
-            ),
-          ),
+          Icon(icon, color: color, size: 22),
           const SizedBox(height: 8),
           Text(
             value,
             style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
               color: isDark ? AppColors.darkText : AppColors.lightText,
             ),
           ),
           Text(
-            label,
+            label.toUpperCase(),
             style: TextStyle(
-              fontSize: 12,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              fontSize: 10,
+              letterSpacing: 0.4,
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
             ),
           ),
         ],
@@ -802,18 +916,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildSectionHeader(bool isDark, String title) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
-          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-        ),
-      ),
-    );
+    return EnterpriseUi.sectionLabel(title, isDark);
   }
 
   Widget _buildSettingsItem({
@@ -948,6 +1051,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _showSignOutDialog(BuildContext context) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -964,6 +1068,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
+              db.setActiveUserId(null);
               await auth.logout();
               if (!context.mounted) return;
               context.go(AppRoutes.login);

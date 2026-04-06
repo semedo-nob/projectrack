@@ -72,16 +72,10 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
 
       // If projectId is provided, load only that project's receipts
       List<Expense> allExpenses;
-      if (widget.projectId != null) {
+      if (widget.projectId != null && widget.projectId!.isNotEmpty) {
         allExpenses = await db.getExpensesByProject(widget.projectId!);
       } else {
-        // Load all receipts from all projects
-        // This would need a method to get all expenses across projects
-        // For now, we'll just use mock data or implement a getAllExpenses method
-        allExpenses = [];
-
-        // TODO: Implement getAllExpenses in database provider
-        // allExpenses = await db.getAllExpenses();
+        allExpenses = await db.getAllExpenses();
       }
 
       // Filter only expenses with receipt images
@@ -290,7 +284,16 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
                           ),
                           const SizedBox(height: 24),
                           ElevatedButton.icon(
-                            onPressed: () => context.push(AppRoutes.receiptOcr),
+                            onPressed: () {
+                              if (widget.projectId != null && widget.projectId!.isNotEmpty) {
+                                context.push(
+                                  AppRoutes.projectReceiptOcr.replaceFirst(':id', widget.projectId!),
+                                  extra: {'projectName': widget.projectName},
+                                );
+                              } else {
+                                context.push(AppRoutes.receiptOcr);
+                              }
+                            },
                             icon: const Icon(Icons.camera_alt_rounded),
                             label: const Text('Scan Receipt'),
                             style: ElevatedButton.styleFrom(
@@ -323,26 +326,17 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
                     ),
                   ),
 
-              // Bottom Spacer
-              const SliverToBoxAdapter(child: SizedBox(height: 100)),
+              // Bottom Spacer (for FAB)
+              const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
           ),
 
           // Floating Action Button
           if (!_isLoading)
             Positioned(
-              bottom: 100,
+              bottom: 24,
               right: 16,
               child: _buildFAB(isDark),
-            ),
-
-          // Bottom Navigation Bar (if not in project context)
-          if (widget.projectId == null)
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _buildBottomNavigation(isDark),
             ),
         ],
       ),
@@ -650,8 +644,11 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
   Widget _buildFAB(bool isDark) {
     return FloatingActionButton(
       onPressed: () {
-        if (widget.projectId != null) {
-          context.push('/project/${widget.projectId}/receipt-ocr');
+        if (widget.projectId != null && widget.projectId!.isNotEmpty) {
+          context.push(
+            AppRoutes.projectReceiptOcr.replaceFirst(':id', widget.projectId!),
+            extra: {'projectName': widget.projectName},
+          );
         } else {
           context.push(AppRoutes.receiptOcr);
         }
@@ -664,88 +661,4 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
     );
   }
 
-  Widget _buildBottomNavigation(bool isDark) {
-    return Container(
-      height: 80,
-      decoration: BoxDecoration(
-        color: (isDark ? AppColors.darkSurface : Colors.white).withOpacity(0.9),
-        border: Border(
-          top: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildNavItem(
-              icon: Icons.business_center_rounded,
-              label: 'Projects',
-              isSelected: false,
-              isDark: isDark,
-            ),
-            _buildNavItem(
-              icon: Icons.receipt_long_rounded,
-              label: 'Receipts',
-              isSelected: true,
-              isDark: isDark,
-            ),
-            _buildNavItem(
-              icon: Icons.pie_chart_rounded,
-              label: 'Reports',
-              isSelected: false,
-              isDark: isDark,
-            ),
-            _buildNavItem(
-              icon: Icons.settings_rounded,
-              label: 'Settings',
-              isSelected: false,
-              isDark: isDark,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem({
-    required IconData icon,
-    required String label,
-    required bool isSelected,
-    required bool isDark,
-  }) {
-    return GestureDetector(
-      onTap: () {
-        if (label == 'Projects') context.go(AppRoutes.projects);
-        else if (label == 'Receipts') context.go(AppRoutes.receiptGallery);
-        else if (label == 'Reports') context.go(AppRoutes.reportsAnalytics);
-        else if (label == 'Settings') context.go(AppRoutes.settings);
-      },
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            color: isSelected
-                ? AppColors.primary
-                : (isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary),
-            size: 24,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              color: isSelected
-                  ? AppColors.primary
-                  : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }

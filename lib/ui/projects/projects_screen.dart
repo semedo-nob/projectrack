@@ -1,20 +1,19 @@
 // lib/ui/projects/projects_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:projectrack1/themes/app_colors.dart';
-import 'package:projectrack1/constants/models/expense_model.dart';
 import 'package:projectrack1/constants/models/projects_model.dart';
+import 'package:projectrack1/service/export_service.dart';
 import 'package:projectrack1/ui/projects/widgets/projects_card.dart';
 import 'package:provider/provider.dart';
-import 'package:excel/excel.dart' hide Border;
-import 'package:file_saver/file_saver.dart';
-import 'dart:typed_data';
 
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
+import '../widgets/enterprise_ui.dart';
 
 class ProjectsScreen extends StatefulWidget {
   const ProjectsScreen({Key? key}) : super(key: key);
@@ -31,6 +30,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   // Selection State
   final Set<String> _selectedProjectIds = {};
   bool _isSelectionMode = false;
+  bool _isExporting = false;
 
   // Filter State
   String _selectedFilter = 'All';
@@ -41,6 +41,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   // Sort State
   String _sortBy = 'name';
   bool _sortAscending = true;
+
+  // View State
+  bool _isGridView = true; // Toggle between grid and list view
 
   // Projects Data
   List<Project> _allProjects = [];
@@ -61,7 +64,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (!mounted) return;
     setState(() {
       _allProjects = list;
-      _maxBudget = list.isEmpty ? 0 : list.map((p) => p.budget).reduce((a, b) => a > b ? a : b);
+      _maxBudget = list.isEmpty
+          ? 0
+          : list.map((p) => p.budget).reduce((a, b) => a > b ? a : b);
       _budgetRange = RangeValues(0, _maxBudget > 0 ? _maxBudget : 1);
       _applyFilters();
       _isLoadingProjects = false;
@@ -71,7 +76,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!mounted) return;
       setState(() {
         _allProjects = list;
-        _maxBudget = list.isEmpty ? 0 : list.map((p) => p.budget).reduce((a, b) => a > b ? a : b);
+        _maxBudget = list.isEmpty
+            ? 0
+            : list.map((p) => p.budget).reduce((a, b) => a > b ? a : b);
         _budgetRange = RangeValues(0, _maxBudget > 0 ? _maxBudget : 1);
         _applyFilters();
       });
@@ -97,19 +104,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   void _applyFilters() {
     _filteredProjects = _allProjects.where((project) {
       // Search filter
-      bool matchesSearch = _searchQuery.isEmpty ||
+      bool matchesSearch =
+          _searchQuery.isEmpty ||
           project.name.toLowerCase().contains(_searchQuery) ||
           project.description.toLowerCase().contains(_searchQuery) ||
           project.tags.any((tag) => tag.toLowerCase().contains(_searchQuery)) ||
           project.category.toLowerCase().contains(_searchQuery);
 
       // Budget filter
-      bool matchesBudget = project.budget >= _budgetRange.start &&
+      bool matchesBudget =
+          project.budget >= _budgetRange.start &&
           project.budget <= _budgetRange.end;
 
       // Status filter
-      bool matchesStatus = _selectedFilter == 'All' ||
-          project.status == _selectedFilter;
+      bool matchesStatus =
+          _selectedFilter == 'All' || project.status == _selectedFilter;
 
       return matchesSearch && matchesBudget && matchesStatus;
     }).toList();
@@ -170,111 +179,74 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     });
   }
 
+  /// Resolves which project IDs to export, then fetches current project list from DB
+  /// so that export uses realtime data (spent, budget, expenses).
+  Future<List<Project>?> _resolveProjectsToExport() async {
+    final Set<String> ids = _selectedProjectIds.isEmpty
+        ? _filteredProjects.map((p) => p.id).toSet()
+        : _selectedProjectIds;
+    if (ids.isEmpty) return null;
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final allProjects = await db.getAllProjects();
+    final list = allProjects.where((p) => ids.contains(p.id)).toList();
+    return list.isEmpty ? null : list;
+  }
+
   Future<void> _exportToExcel() async {
     try {
-      List<Project> projectsToExport = _selectedProjectIds.isEmpty
-          ? _filteredProjects
-          : _allProjects.where((p) => _selectedProjectIds.contains(p.id)).toList();
-
-      if (projectsToExport.isEmpty) {
+      final projectsToExport = await _resolveProjectsToExport();
+      if (projectsToExport == null || projectsToExport.isEmpty) {
         _showSnackBar('No projects to export', AppColors.warning);
         return;
       }
 
+      setState(() => _isExporting = true);
+
       final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
-      final dateFmt = DateFormat('yyyy-MM-dd');
-
-      var excel = Excel.createExcel();
-      // Sheet 1: Project Logs (project name, logs by date, entry name as user gave)
-      Sheet logSheet = excel['Project Logs'];
-      logSheet.appendRow([
-        TextCellValue('Project Name'),
-        TextCellValue('Date'),
-        TextCellValue('Entry Name'),
-        TextCellValue('Merchant'),
-        TextCellValue('Category'),
-        TextCellValue('Amount'),
-      ]);
-      _styleHeaderRow(logSheet, 0, 6);
-
-      int logRow = 1;
-      for (var project in projectsToExport) {
-        List<Expense> expenses = await db.getExpensesByProject(project.id);
-        expenses.sort((a, b) => a.date.compareTo(b.date));
-        for (var e in expenses) {
-          final entryName = (e.notes != null && e.notes!.trim().isNotEmpty)
-              ? e.notes!
-              : e.merchant;
-          logSheet.appendRow([
-            TextCellValue(project.name),
-            TextCellValue(dateFmt.format(e.date)),
-            TextCellValue(entryName),
-            TextCellValue(e.merchant),
-            TextCellValue(e.category.displayName),
-            DoubleCellValue(e.amount),
-          ]);
-          logRow++;
-        }
-      }
-
-      // Sheet 2: Projects summary
-      Sheet summarySheet = excel['Projects'];
-      summarySheet.appendRow([
-        TextCellValue('Name'),
-        TextCellValue('Description'),
-        TextCellValue('Start Date'),
-        TextCellValue('End Date'),
-        TextCellValue('Budget'),
-        TextCellValue('Spent'),
-        TextCellValue('Status'),
-        TextCellValue('Category'),
-        TextCellValue('Progress %'),
-      ]);
-      _styleHeaderRow(summarySheet, 0, 9);
-      for (var project in projectsToExport) {
-        summarySheet.appendRow([
-          TextCellValue(project.name),
-          TextCellValue(project.description),
-          TextCellValue(dateFmt.format(project.startDate)),
-          TextCellValue(project.endDate != null ? dateFmt.format(project.endDate!) : 'N/A'),
-          DoubleCellValue(project.budget),
-          DoubleCellValue(project.spent),
-          TextCellValue(project.status),
-          TextCellValue(project.category),
-          DoubleCellValue((project.progress * 100).clamp(0.0, 100.0)),
-        ]);
-      }
-
-      var fileBytes = excel.save();
-      if (fileBytes != null) {
-        String fileName = 'projects_export_${DateTime.now().millisecondsSinceEpoch}.xlsx';
-        await FileSaver.instance.saveFile(
-          name: fileName,
-          bytes: Uint8List.fromList(fileBytes),
-          fileExtension: 'xlsx',
-          mimeType: MimeType.microsoftExcel,
-        );
-        _showSnackBar(
-          'Exported ${projectsToExport.length} project(s) with logs',
-          AppColors.success,
-        );
-        _clearSelection();
-      }
+      final savedPath = await ExportService.instance.exportProjectsToExcel(
+        projects: projectsToExport,
+        expensesLoader: db.getExpensesByProject,
+      );
+      if (!mounted) return;
+      await _showExportResultDialog(
+        formatLabel: 'Excel',
+        savedPath: savedPath,
+        count: projectsToExport.length,
+      );
+      _clearSelection();
     } catch (e) {
       _showSnackBar('Error exporting: $e', AppColors.error);
+    } finally {
+      setState(() => _isExporting = false);
     }
   }
 
-  void _styleHeaderRow(Sheet sheet, int rowIndex, int colCount) {
-    for (var col = 0; col < colCount; col++) {
-      var cell = sheet.cell(CellIndex.indexByColumnRow(rowIndex: rowIndex, columnIndex: col));
-      cell.cellStyle = CellStyle(
-        backgroundColorHex: ExcelColor.fromHexString('#5A4FCF'),
-        bold: true,
-        textWrapping: TextWrapping.WrapText,
-        verticalAlign: VerticalAlign.Center,
-        horizontalAlign: HorizontalAlign.Center,
+  Future<void> _exportToCsv() async {
+    try {
+      final projectsToExport = await _resolveProjectsToExport();
+      if (projectsToExport == null || projectsToExport.isEmpty) {
+        _showSnackBar('No projects to export', AppColors.warning);
+        return;
+      }
+
+      setState(() => _isExporting = true);
+
+      final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+      final savedPath = await ExportService.instance.exportProjectsToCsv(
+        projects: projectsToExport,
+        expensesLoader: db.getExpensesByProject,
       );
+      if (!mounted) return;
+      await _showExportResultDialog(
+        formatLabel: 'CSV',
+        savedPath: savedPath,
+        count: projectsToExport.length,
+      );
+      _clearSelection();
+    } catch (e) {
+      _showSnackBar('Error exporting CSV: $e', AppColors.error);
+    } finally {
+      setState(() => _isExporting = false);
     }
   }
 
@@ -284,10 +256,69 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         content: Text(message),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
+    );
+  }
+
+  Future<void> _showExportResultDialog({
+    required String formatLabel,
+    required String savedPath,
+    required int count,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('$formatLabel Export Ready'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Exported $count project(s) to:'),
+              const SizedBox(height: 8),
+              SelectableText(savedPath),
+              const SizedBox(height: 12),
+              const Text(
+                'Choose Open File to let Android or iOS ask which viewer to use.',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: savedPath));
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+                _showSnackBar('File path copied', AppColors.success);
+              },
+              child: const Text('Copy Path'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Close'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final result = await OpenFilex.open(savedPath);
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop();
+                }
+                if (result.type != ResultType.done) {
+                  _showSnackBar(
+                    result.message.isEmpty
+                        ? 'No viewer app was available to open this file.'
+                        : result.message,
+                    AppColors.warning,
+                  );
+                }
+              },
+              child: const Text('Open File'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -321,7 +352,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final isDark = themeProvider.isDarkMode(context);
 
     return Scaffold(
-      backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+      backgroundColor: EnterpriseUi.screenBg(isDark),
       body: CustomScrollView(
         slivers: [
           // App Bar
@@ -329,24 +360,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
           // Search Bar
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.fromLTRB(EnterpriseUi.padH, 8, EnterpriseUi.padH, 12),
             sliver: SliverToBoxAdapter(child: _buildSearchBar(isDark)),
           ),
 
           // Filter Chips
           SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: EnterpriseUi.padH),
             sliver: SliverToBoxAdapter(child: _buildFilterChips(isDark)),
           ),
 
-          // Results Count
+          // Results Count and View Toggle
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(EnterpriseUi.padH, 12, EnterpriseUi.padH, 8),
             sliver: SliverToBoxAdapter(child: _buildResultsCount(isDark)),
           ),
 
-          // Projects Grid
-          _buildProjectsGrid(isDark),
+          // Projects Grid/List
+          _buildProjectsView(isDark),
         ],
       ),
     );
@@ -361,31 +392,31 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       elevation: 0,
       title: _isSelectionMode
           ? Text(
-        '${_selectedProjectIds.length} selected',
-        style: TextStyle(
-          color: isDark ? AppColors.darkText : AppColors.lightText,
-          fontWeight: FontWeight.w600,
-        ),
-      )
+              '${_selectedProjectIds.length} selected',
+              style: TextStyle(
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+                fontWeight: FontWeight.w600,
+              ),
+            )
           : const Text(
-        'Projects',
-        style: TextStyle(fontWeight: FontWeight.bold),
-      ),
+              'Projects',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
       leading: _isSelectionMode
           ? IconButton(
-        icon: Icon(
-          Icons.close_rounded,
-          color: isDark ? AppColors.darkText : AppColors.lightText,
-        ),
-        onPressed: _clearSelection,
-      )
+              icon: Icon(
+                Icons.close_rounded,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+              ),
+              onPressed: _clearSelection,
+            )
           : IconButton(
-        icon: Icon(
-          Icons.arrow_back_ios_new_rounded,
-          color: isDark ? AppColors.darkText : AppColors.lightText,
-        ),
-        onPressed: () => context.go(AppRoutes.home),
-      ),
+              icon: Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+              ),
+              onPressed: () => context.go(AppRoutes.home),
+            ),
       actions: [
         if (_isSelectionMode)
           IconButton(
@@ -396,14 +427,61 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             onPressed: _selectAll,
           ),
         if (_isSelectionMode && _selectedProjectIds.isNotEmpty)
-          IconButton(
-            icon: Icon(
-              Icons.download_rounded,
-              color: AppColors.primary,
-            ),
-            onPressed: _exportToExcel,
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              if (_isExporting)
+                const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      AppColors.primary,
+                    ),
+                  ),
+                ),
+              PopupMenuButton<String>(
+                enabled: !_isExporting,
+                icon: Icon(
+                  Icons.download_rounded,
+                  color: _isExporting ? Colors.transparent : AppColors.primary,
+                ),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'excel',
+                    child: ListTile(
+                      leading: Icon(Icons.table_chart_rounded),
+                      title: Text('Export as Excel (.xlsx)'),
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'csv',
+                    child: ListTile(
+                      leading: Icon(Icons.description_rounded),
+                      title: Text('Export as CSV (.csv)'),
+                    ),
+                  ),
+                ],
+                onSelected: (value) {
+                  if (value == 'excel') _exportToExcel();
+                  if (value == 'csv') _exportToCsv();
+                },
+              ),
+            ],
           ),
         if (!_isSelectionMode) ...[
+          // View Toggle Button
+          IconButton(
+            icon: Icon(
+              _isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+            tooltip: _isGridView
+                ? 'Switch to List View'
+                : 'Switch to Grid View',
+            onPressed: () => setState(() => _isGridView = !_isGridView),
+          ),
           IconButton(
             icon: Icon(
               Icons.checklist_rounded,
@@ -418,15 +496,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               color: isDark ? AppColors.darkText : AppColors.lightText,
             ),
             onPressed: _showFilterBottomSheet,
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.search_rounded,
-              color: isDark ? AppColors.darkText : AppColors.lightText,
-            ),
-            onPressed: () {
-              FocusScope.of(context).requestFocus(_searchFocusNode);
-            },
           ),
         ],
       ],
@@ -447,27 +516,36 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         controller: _searchController,
         focusNode: _searchFocusNode,
         decoration: InputDecoration(
-          hintText: 'Search by name, tags, category...',
+          hintText: 'Search projects…',
           hintStyle: TextStyle(
-            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+            color: isDark
+                ? AppColors.darkTextTertiary
+                : AppColors.lightTextTertiary,
           ),
           prefixIcon: Icon(
             Icons.search_rounded,
-            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+            color: isDark
+                ? AppColors.darkTextTertiary
+                : AppColors.lightTextTertiary,
           ),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
-            icon: Icon(
-              Icons.clear_rounded,
-              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-            ),
-            onPressed: () {
-              _searchController.clear();
-            },
-          )
+                  icon: Icon(
+                    Icons.clear_rounded,
+                    color: isDark
+                        ? AppColors.darkTextTertiary
+                        : AppColors.lightTextTertiary,
+                  ),
+                  onPressed: () {
+                    _searchController.clear();
+                  },
+                )
               : null,
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 16,
+          ),
         ),
         style: TextStyle(
           color: isDark ? AppColors.darkText : AppColors.lightText,
@@ -530,14 +608,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             decoration: BoxDecoration(
               color: isSelected
                   ? Colors.black.withOpacity(0.1)
-                  : (isDark ? AppColors.darkTextTertiary : Colors.grey.shade300),
+                  : (isDark
+                        ? AppColors.darkTextTertiary
+                        : Colors.grey.shade300),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
               count.toString(),
               style: TextStyle(
                 fontSize: 11,
-                color: isSelected ? Colors.black : (isDark ? Colors.white : Colors.black87),
+                color: isSelected
+                    ? Colors.black
+                    : (isDark ? Colors.white : Colors.black87),
               ),
             ),
           ),
@@ -566,35 +648,62 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
-          '${_filteredProjects.length} projects found',
+          '${_filteredProjects.length} project${_filteredProjects.length != 1 ? 's' : ''} found',
           style: TextStyle(
             fontSize: 14,
-            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            color: isDark
+                ? AppColors.darkTextSecondary
+                : AppColors.lightTextSecondary,
           ),
         ),
         if (_filteredProjects.isNotEmpty)
-          TextButton.icon(
-            onPressed: _exportToExcel,
-            icon: Icon(
-              Icons.download_rounded,
-              size: 18,
-              color: AppColors.primary,
-            ),
-            label: Text(
-              _selectedProjectIds.isEmpty
-                  ? 'Export all'
-                  : 'Export (${_selectedProjectIds.length} selected)',
-              style: TextStyle(color: AppColors.primary),
-            ),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
+          Row(
+            children: [
+              PopupMenuButton<String>(
+                enabled: !_isExporting,
+                icon: _isExporting
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary,
+                        ),
+                      )
+                    : Icon(
+                        Icons.download_rounded,
+                        size: 18,
+                        color: AppColors.primary,
+                      ),
+                tooltip: 'Export',
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'excel',
+                    child: Text('Export as Excel (.xlsx)'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'csv',
+                    child: Text('Export as CSV (.csv)'),
+                  ),
+                ],
+                onSelected: (value) {
+                  if (value == 'excel') _exportToExcel();
+                  if (value == 'csv') _exportToCsv();
+                },
+              ),
+              Text(
+                _selectedProjectIds.isEmpty
+                    ? 'Export all'
+                    : 'Export (${_selectedProjectIds.length})',
+                style: TextStyle(color: AppColors.primary, fontSize: 14),
+              ),
+            ],
           ),
       ],
     );
   }
 
-  Widget _buildProjectsGrid(bool isDark) {
+  Widget _buildProjectsView(bool isDark) {
     if (_isLoadingProjects) {
       return SliverFillRemaining(
         hasScrollBody: false,
@@ -607,42 +716,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               Text(
                 'Loading projects...',
                 style: TextStyle(
-                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    if (_filteredProjects.isEmpty) {
-      return SliverToBoxAdapter(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const SizedBox(height: 100),
-              Icon(
-                Icons.folder_off_rounded,
-                size: 64,
-                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _allProjects.isEmpty ? 'No projects yet' : 'No projects found',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _allProjects.isEmpty
-                    ? 'Create a project to get started'
-                    : 'Try adjusting your filters',
-                style: TextStyle(
-                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                  color: isDark
+                      ? AppColors.darkTextSecondary
+                      : AppColors.lightTextSecondary,
                 ),
               ),
             ],
@@ -651,17 +727,63 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       );
     }
 
-    return SliverPadding(
-      padding: const EdgeInsets.all(16),
-      sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 0.75,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
+    if (_filteredProjects.isEmpty) {
+      return SliverToBoxAdapter(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.folder_off_rounded,
+                  size: 64,
+                  color: isDark
+                      ? AppColors.darkTextTertiary
+                      : AppColors.lightTextTertiary,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _allProjects.isEmpty
+                      ? 'No projects yet'
+                      : 'No projects found',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? AppColors.darkText : AppColors.lightText,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _allProjects.isEmpty
+                      ? 'Create a project to get started'
+                      : 'Try adjusting your filters',
+                  style: TextStyle(
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        delegate: SliverChildBuilderDelegate(
-              (context, index) {
+      );
+    }
+
+    if (_isGridView) {
+      // Grid View
+      return SliverPadding(
+        padding: const EdgeInsets.all(16),
+        sliver: SliverGrid(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            // Slightly taller cells so project cards (image + meta + progress) fit on small widths.
+            childAspectRatio: 0.72,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+          ),
+          delegate: SliverChildBuilderDelegate((context, index) {
             final project = _filteredProjects[index];
             final isSelected = _selectedProjectIds.contains(project.id);
 
@@ -669,20 +791,55 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               project: project,
               isSelected: isSelected,
               isDark: isDark,
+              isListView: false,
               onTap: () {
                 if (_isSelectionMode) {
                   _toggleSelection(project.id);
                 } else {
-                  context.push('/project/${project.id}', extra: project.name);
+                  context.push(
+                    AppRoutes.projectOverview.replaceFirst(':id', project.id),
+                    extra: project.name,
+                  );
                 }
               },
               onLongPress: () => _toggleSelection(project.id),
             );
-          },
-          childCount: _filteredProjects.length,
+          }, childCount: _filteredProjects.length),
         ),
-      ),
-    );
+      );
+    } else {
+      // List View
+      return SliverPadding(
+        padding: const EdgeInsets.all(16),
+        sliver: SliverList(
+          delegate: SliverChildBuilderDelegate((context, index) {
+            final project = _filteredProjects[index];
+            final isSelected = _selectedProjectIds.contains(project.id);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: ProjectCard(
+                project: project,
+                isSelected: isSelected,
+                isDark: isDark,
+                isListView: true,
+                onTap: () {
+                  if (_isSelectionMode) {
+                    _toggleSelection(project.id);
+                  } else {
+                    context.push(
+                      AppRoutes.projectOverview.replaceFirst(':id', project.id),
+                      extra: project.name,
+                    );
+                  }
+                },
+                onLongPress: () => _toggleSelection(project.id),
+              ),
+            );
+          }, childCount: _filteredProjects.length),
+        ),
+      );
+    }
   }
 }
 
@@ -791,7 +948,12 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               height: 56,
               child: ElevatedButton(
                 onPressed: () {
-                  widget.onApply(_selectedFilter, _budgetRange, _sortBy, _sortAscending);
+                  widget.onApply(
+                    _selectedFilter,
+                    _budgetRange,
+                    _sortBy,
+                    _sortAscending,
+                  );
                   Navigator.pop(context);
                 },
                 style: ElevatedButton.styleFrom(
@@ -825,7 +987,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
         const SizedBox(height: 12),
         Wrap(
           spacing: 8,
-          children: ['All', 'Active', 'Planning', 'On Hold', 'Done'].map((status) {
+          children: ['All', 'Active', 'Planning', 'On Hold', 'Done'].map((
+            status,
+          ) {
             return FilterChip(
               label: Text(status),
               selected: _selectedFilter == status,
@@ -836,7 +1000,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
               },
               selectedColor: AppColors.primary,
               checkmarkColor: Colors.black,
-              backgroundColor: isDark ? AppColors.darkCard : AppColors.lightSurface,
+              backgroundColor: isDark
+                  ? AppColors.darkCard
+                  : AppColors.lightSurface,
               labelStyle: TextStyle(
                 color: _selectedFilter == status
                     ? Colors.black
@@ -885,13 +1051,17 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
             Text(
               '\$${_budgetRange.start.round()}',
               style: TextStyle(
-                color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                color: isDark
+                    ? AppColors.darkTextSecondary
+                    : AppColors.lightTextSecondary,
               ),
             ),
             Text(
               '\$${_budgetRange.end.round()}',
               style: TextStyle(
-                color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                color: isDark
+                    ? AppColors.darkTextSecondary
+                    : AppColors.lightTextSecondary,
               ),
             ),
           ],
@@ -957,7 +1127,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                   });
                 },
                 selectedColor: AppColors.primary,
-                backgroundColor: isDark ? AppColors.darkCard : AppColors.lightSurface,
+                backgroundColor: isDark
+                    ? AppColors.darkCard
+                    : AppColors.lightSurface,
                 labelStyle: TextStyle(
                   color: _sortAscending
                       ? Colors.black
@@ -976,7 +1148,9 @@ class _FilterBottomSheetState extends State<_FilterBottomSheet> {
                   });
                 },
                 selectedColor: AppColors.primary,
-                backgroundColor: isDark ? AppColors.darkCard : AppColors.lightSurface,
+                backgroundColor: isDark
+                    ? AppColors.darkCard
+                    : AppColors.lightSurface,
                 labelStyle: TextStyle(
                   color: !_sortAscending
                       ? Colors.black

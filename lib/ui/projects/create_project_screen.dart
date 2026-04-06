@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:provider/provider.dart';
 
+import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -22,6 +23,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
   final _projectNameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _budgetController = TextEditingController();
+  final _tagsController = TextEditingController();
   DateTime? _startDate;
   DateTime? _endDate;
   String _selectedStatus = 'Planning';
@@ -49,7 +51,18 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     _projectNameController.dispose();
     _descriptionController.dispose();
     _budgetController.dispose();
+    _tagsController.dispose();
     super.dispose();
+  }
+
+  List<String> _parseTags() {
+    return _tagsController.text
+        .split(',')
+        .map((tag) => tag.trim())
+        .where((tag) => tag.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
   }
 
   Future<void> _selectDate(BuildContext context, bool isStartDate) async {
@@ -109,11 +122,19 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     }
 
     final startDate = _startDate ?? DateTime.now();
-    final budget = double.tryParse(_budgetController.text.trim().replaceAll(',', '')) ?? 0.0;
+    final budget =
+        double.tryParse(_budgetController.text.trim().replaceAll(',', '')) ??
+        0.0;
     final projectId = 'proj_${DateTime.now().millisecondsSinceEpoch}';
+    final tags = _parseTags();
 
     setState(() => _isLoading = true);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
     final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final uid = auth.currentUser?.id;
+    if (uid != null && db.activeUserId != uid) {
+      db.setActiveUserId(uid);
+    }
     final ok = await db.createProject(
       id: projectId,
       name: name,
@@ -124,6 +145,7 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       status: _selectedStatus,
       category: _selectedCategory,
       imageUrl: '',
+      tags: tags,
     );
 
     if (!mounted) return;
@@ -135,7 +157,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           content: Text(db.error ?? 'Failed to create project'),
           backgroundColor: AppColors.error,
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       );
       return;
@@ -146,7 +170,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
         content: Text('Project created. Add your first log entry.'),
         backgroundColor: AppColors.success,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
       ),
     );
     context.go(AppRoutes.home);
@@ -171,7 +197,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 expandedHeight: 0,
                 floating: true,
                 pinned: true,
-                backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(0.9),
+                backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(
+                  0.9,
+                ),
                 elevation: 0,
                 leading: Container(
                   margin: const EdgeInsets.all(8),
@@ -237,6 +265,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                         // Category Selector
                         _buildCategoryField(isDark, theme),
 
+                        const SizedBox(height: 24),
+
+                        _buildTagField(isDark, theme),
+
                         const SizedBox(height: 100), // Space for bottom button
                       ],
                     ),
@@ -255,6 +287,52 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTagField(bool isDark, ThemeData theme) {
+    final previewTags = _parseTags();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Tags',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _tagsController,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            hintText: 'client, urgent, interior',
+            helperText: 'Separate tags with commas',
+            prefixIcon: const Icon(Icons.sell_outlined),
+            filled: true,
+            fillColor: isDark ? AppColors.darkCard : Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        if (previewTags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: previewTags
+                .map(
+                  (tag) => Chip(
+                    label: Text(tag),
+                    avatar: const Icon(Icons.tag, size: 16),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ],
     );
   }
 
@@ -278,7 +356,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.5,
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                   ),
                 ),
               ),
@@ -301,17 +381,21 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   decoration: InputDecoration(
                     hintText: 'e.g. Q3 Marketing Campaign',
                     hintStyle: TextStyle(
-                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                      color: isDark
+                          ? AppColors.darkTextTertiary
+                          : AppColors.lightTextTertiary,
                     ),
                     suffixIcon: isFocused
                         ? Icon(
-                      Icons.edit_rounded,
-                      color: AppColors.primary,
-                      size: 24,
-                    )
+                            Icons.edit_rounded,
+                            color: AppColors.primary,
+                            size: 24,
+                          )
                         : null,
                     filled: true,
-                    fillColor: isDark ? AppColors.darkCard : AppColors.lightBackground,
+                    fillColor: isDark
+                        ? AppColors.darkCard
+                        : AppColors.lightBackground,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -319,7 +403,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(
-                        color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                        color: isDark
+                            ? AppColors.darkBorder
+                            : AppColors.lightBorder,
                         width: 1,
                       ),
                     ),
@@ -378,7 +464,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.5,
-                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
                   ),
                 ),
               ),
@@ -398,10 +486,14 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   decoration: InputDecoration(
                     hintText: 'Briefly describe the goals and requirements...',
                     hintStyle: TextStyle(
-                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                      color: isDark
+                          ? AppColors.darkTextTertiary
+                          : AppColors.lightTextTertiary,
                     ),
                     filled: true,
-                    fillColor: isDark ? AppColors.darkCard : AppColors.lightBackground,
+                    fillColor: isDark
+                        ? AppColors.darkCard
+                        : AppColors.lightBackground,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -409,7 +501,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(
-                        color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                        color: isDark
+                            ? AppColors.darkBorder
+                            : AppColors.lightBorder,
                         width: 1,
                       ),
                     ),
@@ -489,7 +583,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.5,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
             ),
           ),
         ),
@@ -511,7 +607,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 Icon(
                   Icons.calendar_today_rounded,
                   size: 18,
-                  color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                  color: isDark
+                      ? AppColors.darkTextTertiary
+                      : AppColors.lightTextTertiary,
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -519,7 +617,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     color: date == null
-                        ? (isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary)
+                        ? (isDark
+                              ? AppColors.darkTextTertiary
+                              : AppColors.lightTextTertiary)
                         : (isDark ? AppColors.darkText : AppColors.lightText),
                   ),
                 ),
@@ -543,7 +643,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.5,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
             ),
           ),
         ),
@@ -565,7 +667,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 decoration: BoxDecoration(
                   border: Border(
                     right: BorderSide(
-                      color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                      color: isDark
+                          ? AppColors.darkBorder
+                          : AppColors.lightBorder,
                     ),
                   ),
                 ),
@@ -576,7 +680,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                        color: isDark
+                            ? AppColors.darkTextTertiary
+                            : AppColors.lightTextTertiary,
                       ),
                     ),
                   ),
@@ -593,7 +699,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   decoration: InputDecoration(
                     hintText: '0.00',
                     hintStyle: TextStyle(
-                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                      color: isDark
+                          ? AppColors.darkTextTertiary
+                          : AppColors.lightTextTertiary,
                     ),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -619,7 +727,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.5,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
             ),
           ),
         ),
@@ -645,22 +755,26 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                   decoration: BoxDecoration(
                     color: isSelected
                         ? AppColors.primary
-                        : (isDark ? AppColors.darkCard : AppColors.lightBackground),
+                        : (isDark
+                              ? AppColors.darkCard
+                              : AppColors.lightBackground),
                     borderRadius: BorderRadius.circular(30),
                     border: Border.all(
                       color: isSelected
                           ? Colors.transparent
-                          : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                          : (isDark
+                                ? AppColors.darkBorder
+                                : AppColors.lightBorder),
                       width: 1,
                     ),
                     boxShadow: isSelected
                         ? [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.3),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      )
-                    ]
+                            BoxShadow(
+                              color: AppColors.primary.withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
                         : null,
                   ),
                   child: Row(
@@ -669,17 +783,23 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                         option['icon'],
                         color: isSelected
                             ? Colors.black
-                            : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
+                            : (isDark
+                                  ? AppColors.darkTextSecondary
+                                  : AppColors.lightTextSecondary),
                         size: 20,
                       ),
                       const SizedBox(width: 8),
                       Text(
                         option['label'],
                         style: TextStyle(
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.w500,
                           color: isSelected
                               ? Colors.black
-                              : (isDark ? AppColors.darkText : AppColors.lightText),
+                              : (isDark
+                                    ? AppColors.darkText
+                                    : AppColors.lightText),
                         ),
                       ),
                     ],
@@ -705,7 +825,9 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.5,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
             ),
           ),
         ),
@@ -724,8 +846,13 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             child: DropdownButton<String>(
               value: _selectedCategory,
               isExpanded: true,
-              icon: Icon(Icons.arrow_drop_down_rounded, color: theme.iconTheme.color),
-              items: _categoryOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+              icon: Icon(
+                Icons.arrow_drop_down_rounded,
+                color: theme.iconTheme.color,
+              ),
+              items: _categoryOptions
+                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                  .toList(),
               onChanged: (v) {
                 if (v != null) setState(() => _selectedCategory = v);
               },
@@ -748,7 +875,8 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            (isDark ? AppColors.darkBackground : AppColors.lightBackground).withOpacity(0),
+            (isDark ? AppColors.darkBackground : AppColors.lightBackground)
+                .withOpacity(0),
             isDark ? AppColors.darkBackground : AppColors.lightBackground,
           ],
         ),
@@ -770,27 +898,27 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
             ),
             child: _isLoading
                 ? const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-              ),
-            )
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                    ),
+                  )
                 : Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
-                Icon(Icons.save_rounded),
-                SizedBox(width: 12),
-                Text(
-                  'Create Project',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.save_rounded),
+                      SizedBox(width: 12),
+                      Text(
+                        'Create Project',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
         ),
       ),

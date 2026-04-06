@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../service/secure_storage_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -18,7 +19,9 @@ class NotificationsScreen extends StatefulWidget {
 class _NotificationsScreenState extends State<NotificationsScreen> {
   String _selectedFilter = 'All';
   List<Map<String, dynamic>> _notifications = [];
+  Set<String> _dismissedNotificationIds = <String>{};
   bool _loading = true;
+  final SecureStorageService _storage = SecureStorageService();
 
   @override
   void initState() {
@@ -28,12 +31,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _loadNotifications() async {
     final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final dismissed = await _storage.getDismissedNotifications();
     final list = await db.getProjectNotifications();
     if (!mounted) return;
     setState(() {
-      _notifications = list;
+      _dismissedNotificationIds = dismissed;
+      _notifications = list
+          .where((n) => !_dismissedNotificationIds.contains(_notificationId(n)))
+          .toList();
       _loading = false;
     });
+  }
+
+  String _notificationId(Map<String, dynamic> notification) {
+    return notification['id']?.toString() ??
+        [
+          notification['type'],
+          notification['title'],
+          notification['description'],
+          notification['projectId'],
+          notification['projectName'],
+          notification['time'],
+        ].join('|');
   }
 
   List<Map<String, dynamic>> get _filteredNotifications {
@@ -42,7 +61,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final type = n['type'] as String?;
       if (_selectedFilter == 'Tasks' && type == 'task') return true;
       if (_selectedFilter == 'Budgets' && type == 'budget') return true;
-      if (_selectedFilter == 'Projects' && (type == 'activity' || type == 'status' || type == 'asset')) return true;
+      if (_selectedFilter == 'Projects' &&
+          (type == 'activity' || type == 'status' || type == 'asset'))
+        return true;
       return false;
     }).toList();
   }
@@ -69,6 +90,79 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteNotification(Map<String, dynamic> notification) async {
+    final id = _notificationId(notification);
+    final removed = Map<String, dynamic>.from(notification);
+    final removedIndex = _notifications.indexWhere(
+      (item) => _notificationId(item) == id,
+    );
+    if (removedIndex < 0) return;
+
+    setState(() {
+      _notifications.removeAt(removedIndex);
+      _dismissedNotificationIds.add(id);
+    });
+    await _storage.saveDismissedNotifications(_dismissedNotificationIds);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Notification deleted'),
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Undo',
+          textColor: Colors.white,
+          onPressed: () async {
+            setState(() {
+              _dismissedNotificationIds.remove(id);
+              _notifications.insert(
+                removedIndex.clamp(0, _notifications.length),
+                removed,
+              );
+            });
+            await _storage.saveDismissedNotifications(
+              _dismissedNotificationIds,
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteAllNotifications() async {
+    if (_notifications.isEmpty) return;
+    final removed = _notifications
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+    final removedIds = removed.map(_notificationId).toSet();
+    setState(() {
+      _dismissedNotificationIds.addAll(removedIds);
+      _notifications.clear();
+    });
+    await _storage.saveDismissedNotifications(_dismissedNotificationIds);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('All notifications deleted'),
+        backgroundColor: AppColors.warning,
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Undo',
+          textColor: Colors.white,
+          onPressed: () async {
+            setState(() {
+              _dismissedNotificationIds.removeAll(removedIds);
+              _notifications = removed;
+            });
+            await _storage.saveDismissedNotifications(
+              _dismissedNotificationIds,
+            );
+          },
         ),
       ),
     );
@@ -102,7 +196,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             // Notifications List
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                        color: AppColors.primary,
+                      ),
+                    )
                   : _buildNotificationsList(isDark),
             ),
           ],
@@ -115,7 +213,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: (isDark ? AppColors.darkBackground : AppColors.lightBackground).withOpacity(0.95),
+        color: (isDark ? AppColors.darkBackground : AppColors.lightBackground)
+            .withOpacity(0.95),
         border: Border(
           bottom: BorderSide(
             color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
@@ -158,21 +257,24 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
           const Spacer(),
 
-          // Mark All Read Button
-          TextButton(
-            onPressed: _markAllAsRead,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              padding: EdgeInsets.zero,
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            child: const Text(
-              'Mark all read',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'read') {
+                _markAllAsRead();
+              } else if (value == 'clear') {
+                _deleteAllNotifications();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem<String>(
+                value: 'read',
+                child: Text('Mark all read'),
               ),
+              PopupMenuItem<String>(value: 'clear', child: Text('Delete all')),
+            ],
+            icon: Icon(
+              Icons.more_vert_rounded,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
             ),
           ),
         ],
@@ -227,16 +329,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           border: isSelected
               ? null
               : Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
           boxShadow: isSelected
               ? [
-            BoxShadow(
-              color: AppColors.primary.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ]
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
               : null,
         ),
         child: Text(
@@ -246,7 +348,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
             color: isSelected
                 ? Colors.black
-                : (isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary),
+                : (isDark
+                      ? AppColors.darkTextSecondary
+                      : AppColors.lightTextSecondary),
           ),
         ),
       ),
@@ -264,31 +368,49 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       onRefresh: _loadNotifications,
       color: AppColors.primary,
       child: ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      children: grouped.entries.map((entry) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Section Header
-            _buildSectionHeader(isDark, entry.key),
-            const SizedBox(height: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: grouped.entries.map((entry) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Section Header
+              _buildSectionHeader(isDark, entry.key),
+              const SizedBox(height: 8),
 
-            // Notifications in this section
-            ...entry.value.map((notification) {
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _buildNotificationItem(
-                  isDark: isDark,
-                  notification: notification,
-                  onTap: () => _openProject(notification),
-                ),
-              );
-            }),
+              // Notifications in this section
+              ...entry.value.map((notification) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Dismissible(
+                    key: ValueKey(_notificationId(notification)),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: AppColors.error.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                    onDismissed: (_) => _deleteNotification(notification),
+                    child: _buildNotificationItem(
+                      isDark: isDark,
+                      notification: notification,
+                      onTap: () => _openProject(notification),
+                      onDelete: () => _deleteNotification(notification),
+                    ),
+                  ),
+                );
+              }),
 
-            const SizedBox(height: 16),
-          ],
-        );
-      }).toList(),
+              const SizedBox(height: 16),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -302,7 +424,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             fontSize: 12,
             fontWeight: FontWeight.bold,
             letterSpacing: 0.5,
-            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            color: isDark
+                ? AppColors.darkTextSecondary
+                : AppColors.lightTextSecondary,
           ),
         ),
         const SizedBox(width: 16),
@@ -320,6 +444,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     required bool isDark,
     required Map<String, dynamic> notification,
     VoidCallback? onTap,
+    VoidCallback? onDelete,
   }) {
     final hasUnreadDot = notification['unread'] == true;
     final hasAction = notification['action'] == true;
@@ -334,148 +459,181 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           onTap: onTap,
           borderRadius: BorderRadius.circular(12),
           child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppColors.darkCard : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isDark ? AppColors.salamonoShadowDark : AppColors.salamonoShadow,
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkCard : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: isDark
+                      ? AppColors.salamonoShadowDark
+                      : AppColors.salamonoShadow,
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            // Unread Dot
-            if (hasUnreadDot)
-              Positioned(
-                top: 16,
-                right: 16,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(0.6),
-                        blurRadius: 8,
-                        spreadRadius: 1,
+            child: Stack(
+              children: [
+                // Unread Dot
+                if (hasUnreadDot)
+                  Positioned(
+                    top: 16,
+                    right: 16,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.6),
+                            blurRadius: 8,
+                            spreadRadius: 1,
+                          ),
+                        ],
                       ),
+                    ),
+                  ),
+
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Main Content Row
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Icon
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: notification['iconBgColor'],
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              notification['icon'],
+                              color: notification['iconColor'],
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+
+                          // Content
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  notification['title'],
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark
+                                        ? AppColors.darkText
+                                        : AppColors.lightText,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  notification['time'],
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? AppColors.darkTextSecondary
+                                        : AppColors.lightTextSecondary,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                RichText(
+                                  text: TextSpan(
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      height: 1.4,
+                                      color: isDark
+                                          ? AppColors.darkTextSecondary
+                                          : AppColors.lightTextSecondary,
+                                    ),
+                                    children: _parseDescription(
+                                      notification['description']?.toString() ??
+                                          '',
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          Column(
+                            children: [
+                              if (hasChevron)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: isDark
+                                        ? AppColors.darkTextTertiary
+                                        : AppColors.lightTextTertiary,
+                                  ),
+                                ),
+                              IconButton(
+                                onPressed: onDelete,
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: isDark
+                                      ? AppColors.darkTextTertiary
+                                      : AppColors.lightTextTertiary,
+                                  size: 20,
+                                ),
+                                tooltip: 'Delete notification',
+                                splashRadius: 18,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      // Action Button (if needed)
+                      if (hasAction)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 64, top: 8),
+                          child: TextButton(
+                            onPressed: onTap,
+                            style: TextButton.styleFrom(
+                              backgroundColor: AppColors.primary.withOpacity(
+                                0.1,
+                              ),
+                              foregroundColor: AppColors.primary,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                            ),
+                            child: Text(
+                              notification['actionLabel'] ?? 'Review',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
-              ),
-
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Main Content Row
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Icon
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: notification['iconBgColor'],
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          notification['icon'],
-                          color: notification['iconColor'],
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-
-                      // Content
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              notification['title'],
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? AppColors.darkText : AppColors.lightText,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              notification['time'],
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            RichText(
-                              text: TextSpan(
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  height: 1.4,
-                                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                                ),
-                                children: _parseDescription(notification['description']?.toString() ?? ''),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Chevron (if needed)
-                      if (hasChevron)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: Icon(
-                            Icons.chevron_right_rounded,
-                            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                          ),
-                        ),
-                    ],
-                  ),
-
-                  // Action Button (if needed)
-                  if (hasAction)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 64, top: 8),
-                      child: TextButton(
-                        onPressed: onTap,
-                        style: TextButton.styleFrom(
-                          backgroundColor: AppColors.primary.withOpacity(0.1),
-                          foregroundColor: AppColors.primary,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                        ),
-                        child: Text(
-                          notification['actionLabel'] ?? 'Review',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
         ),
       ),
     );
@@ -489,14 +647,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     for (final match in regex.allMatches(description)) {
       // Add text before the quoted part
       if (match.start > lastIndex) {
-        spans.add(TextSpan(text: description.substring(lastIndex, match.start)));
+        spans.add(
+          TextSpan(text: description.substring(lastIndex, match.start)),
+        );
       }
 
       // Add the quoted part with bold styling
-      spans.add(TextSpan(
-        text: match.group(0),
-        style: const TextStyle(fontWeight: FontWeight.bold),
-      ));
+      spans.add(
+        TextSpan(
+          text: match.group(0),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      );
 
       lastIndex = match.end;
     }
@@ -517,7 +679,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           Icon(
             Icons.done_all_rounded,
             size: 64,
-            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+            color: isDark
+                ? AppColors.darkTextTertiary
+                : AppColors.lightTextTertiary,
           ),
           const SizedBox(height: 16),
           Text(
@@ -525,7 +689,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w500,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark
+                  ? AppColors.darkTextSecondary
+                  : AppColors.lightTextSecondary,
             ),
           ),
         ],

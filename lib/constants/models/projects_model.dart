@@ -102,6 +102,8 @@ class ProjectCompanion extends drift.Insertable<Project> {
 // ===== MAIN PROJECT MODEL =====
 class Project {
   final String id;
+  /// Local account that owns this project (null for legacy/mock rows).
+  final String? ownerId;
   final String name;
   final String description;
   final DateTime startDate;
@@ -118,6 +120,7 @@ class Project {
 
   Project({
     required this.id,
+    this.ownerId,
     required this.name,
     required this.description,
     required this.startDate,
@@ -156,6 +159,7 @@ class Project {
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      if (ownerId != null) 'ownerId': ownerId,
       'name': name,
       'description': description,
       'startDate': startDate.toIso8601String(),
@@ -177,6 +181,7 @@ class Project {
   factory Project.fromJson(Map<String, dynamic> json) {
     return Project(
       id: json['id'],
+      ownerId: json['ownerId'] as String?,
       name: json['name'],
       description: json['description'],
       startDate: DateTime.parse(json['startDate']),
@@ -197,6 +202,7 @@ class Project {
   factory Project.fromDrift(db.Project data) {
     return Project(
       id: data.id,
+      ownerId: data.ownerId,
       name: data.name,
       description: data.description,
       startDate: data.startDate,
@@ -215,6 +221,7 @@ class Project {
 
   // Create a copy with updated fields
   Project copyWith({
+    String? ownerId,
     String? name,
     String? description,
     DateTime? startDate,
@@ -229,6 +236,7 @@ class Project {
   }) {
     return Project(
       id: id,
+      ownerId: ownerId ?? this.ownerId,
       name: name ?? this.name,
       description: description ?? this.description,
       startDate: startDate ?? this.startDate,

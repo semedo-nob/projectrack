@@ -1,118 +1,16 @@
 // lib/models/expense_model.dart
 import 'package:flutter/material.dart';
-import 'package:drift/drift.dart' as drift;
 import '../../database/database.dart' as db;
+import '../../service/unit_service.dart';
 import '../../themes/app_colors.dart';
-
-// ===== DRIFT COMPANION CLASS FOR DATABASE OPERATIONS =====
-/// This class is used for database operations with Drift
-class ExpenseCompanion extends drift.Insertable<Expense> {
-  final drift.Value<String> id;
-  final drift.Value<String> projectId;
-  final drift.Value<String> merchant;
-  final drift.Value<double> amount;
-  final drift.Value<DateTime> date;
-  final drift.Value<String> category;
-  final drift.Value<String?> notes;
-  final drift.Value<String?> receiptImage;
-  final drift.Value<String> status;
-  final drift.Value<DateTime> createdAt;
-  final drift.Value<DateTime> updatedAt;
-
-  ExpenseCompanion({
-    required this.id,
-    required this.projectId,
-    required this.merchant,
-    required this.amount,
-    required this.date,
-    required this.category,
-    this.notes = const drift.Value.absent(),
-    this.receiptImage = const drift.Value.absent(),
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-  });
-
-  @override
-  Map<String, drift.Expression> toColumns(bool nullToAbsent) {
-    final map = <String, drift.Expression>{};
-    map['id'] = drift.Variable<String>(id.value);
-    map['project_id'] = drift.Variable<String>(projectId.value);
-    map['merchant'] = drift.Variable<String>(merchant.value);
-    map['amount'] = drift.Variable<double>(amount.value);
-    map['date'] = drift.Variable<DateTime>(date.value);
-    map['category'] = drift.Variable<String>(category.value);
-    if (notes.present) map['notes'] = drift.Variable<String>(notes.value);
-    if (receiptImage.present) map['receipt_image'] = drift.Variable<String>(receiptImage.value);
-    map['status'] = drift.Variable<String>(status.value);
-    map['created_at'] = drift.Variable<DateTime>(createdAt.value);
-    map['updated_at'] = drift.Variable<DateTime>(updatedAt.value);
-    return map;
-  }
-
-  // Factory constructor for creating a new expense
-  factory ExpenseCompanion.insert({
-    required String id,
-    required String projectId,
-    required String merchant,
-    required double amount,
-    required DateTime date,
-    required String category,
-    String? notes,
-    String? receiptImage,
-    required String status,
-  }) {
-    final now = DateTime.now();
-    return ExpenseCompanion(
-      id: drift.Value(id),
-      projectId: drift.Value(projectId),
-      merchant: drift.Value(merchant),
-      amount: drift.Value(amount),
-      date: drift.Value(date),
-      category: drift.Value(category),
-      notes: drift.Value(notes),
-      receiptImage: drift.Value(receiptImage),
-      status: drift.Value(status),
-      createdAt: drift.Value(now),
-      updatedAt: drift.Value(now),
-    );
-  }
-
-  // Factory constructor for updating an existing expense
-  factory ExpenseCompanion.update({
-    required String id,
-    String? projectId,
-    String? merchant,
-    double? amount,
-    DateTime? date,
-    String? category,
-    String? notes,
-    String? receiptImage,
-    String? status,
-  }) {
-    final now = DateTime.now();
-    return ExpenseCompanion(
-      id: drift.Value(id),
-      projectId: drift.Value(projectId ?? ''), // Will be ignored in update
-      merchant: drift.Value(merchant ?? ''),
-      amount: drift.Value(amount ?? 0),
-      date: drift.Value(date ?? DateTime.now()),
-      category: drift.Value(category ?? ''),
-      notes: drift.Value(notes),
-      receiptImage: drift.Value(receiptImage),
-      status: drift.Value(status ?? ''),
-      createdAt: const drift.Value.absent(), // Don't update createdAt
-      updatedAt: drift.Value(now),
-    );
-  }
-}
 
 // ===== EXPENSE STATUS ENUM =====
 enum ExpenseStatus {
   pending,
   verified,
   rejected,
-  missing;
+  missing,
+  logged;
 
   String get displayName {
     switch (this) {
@@ -124,6 +22,8 @@ enum ExpenseStatus {
         return 'Rejected';
       case ExpenseStatus.missing:
         return 'Missing Receipt';
+      case ExpenseStatus.logged:
+        return 'Logged';
     }
   }
 
@@ -137,6 +37,8 @@ enum ExpenseStatus {
         return AppColors.error;
       case ExpenseStatus.missing:
         return AppColors.error;
+      case ExpenseStatus.logged:
+        return AppColors.info;
     }
   }
 
@@ -150,6 +52,8 @@ enum ExpenseStatus {
         return AppColors.error.withOpacity(0.1);
       case ExpenseStatus.missing:
         return AppColors.error.withOpacity(0.1);
+      case ExpenseStatus.logged:
+        return AppColors.info.withOpacity(0.1);
     }
   }
 
@@ -163,6 +67,8 @@ enum ExpenseStatus {
         return Icons.cancel_rounded;
       case ExpenseStatus.missing:
         return Icons.receipt_rounded;
+      case ExpenseStatus.logged:
+        return Icons.receipt_long_rounded;
     }
   }
 
@@ -177,6 +83,8 @@ enum ExpenseStatus {
       case 'missing':
       case 'missing receipt':
         return ExpenseStatus.missing;
+      case 'logged':
+        return ExpenseStatus.logged;
       default:
         return ExpenseStatus.pending;
     }
@@ -192,6 +100,7 @@ enum ExpenseCategory {
   permits,
   supplies,
   marketing,
+  receipt,
   other;
 
   String get displayName {
@@ -210,6 +119,8 @@ enum ExpenseCategory {
         return 'Office Supplies';
       case ExpenseCategory.marketing:
         return 'Marketing';
+      case ExpenseCategory.receipt:
+        return 'Receipt / OCR';
       case ExpenseCategory.other:
         return 'Other';
     }
@@ -231,6 +142,8 @@ enum ExpenseCategory {
         return AppColors.success;
       case ExpenseCategory.marketing:
         return Colors.purple;
+      case ExpenseCategory.receipt:
+        return AppColors.primary;
       case ExpenseCategory.other:
         return Colors.grey;
     }
@@ -252,6 +165,8 @@ enum ExpenseCategory {
         return Icons.inventory_rounded;
       case ExpenseCategory.marketing:
         return Icons.campaign_rounded;
+      case ExpenseCategory.receipt:
+        return Icons.document_scanner_rounded;
       case ExpenseCategory.other:
         return Icons.category_rounded;
     }
@@ -277,6 +192,8 @@ enum ExpenseCategory {
         return ExpenseCategory.supplies;
       case 'marketing':
         return ExpenseCategory.marketing;
+      case 'receipt':
+        return ExpenseCategory.receipt;
       default:
         return ExpenseCategory.other;
     }
@@ -293,6 +210,13 @@ class Expense {
   final ExpenseCategory category;
   final String? notes;
   final String? receiptImage;
+  /// Quantity in the unit the user chose (e.g. 2 bags).
+  final double? quantityOriginal;
+  /// Unit id/slug (e.g. u_bag) or legacy name (bag).
+  final String? unitOriginal;
+  /// Normalized quantity in [unitBase] (e.g. kg).
+  final double? quantityBase;
+  final String? unitBase;
   final ExpenseStatus status;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -306,10 +230,24 @@ class Expense {
     required this.category,
     this.notes,
     this.receiptImage,
+    this.quantityOriginal,
+    this.unitOriginal,
+    this.quantityBase,
+    this.unitBase,
     required this.status,
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Human-readable quantity with unit (e.g. "2 bags", "1.5 litres").
+  String get quantityWithUnitLabel {
+    if (quantityOriginal == null || unitOriginal == null) return '';
+    final u = UnitService.optionForStoredUnit(unitOriginal!);
+    if (u == null) {
+      return '${_formatQty(quantityOriginal!)} ${unitOriginal!}';
+    }
+    return UnitService.formatQuantity(quantityOriginal!, u);
+  }
 
   // Convenience constructor with string category/status
   factory Expense.withStrings({
@@ -321,6 +259,10 @@ class Expense {
     required String category,
     String? notes,
     String? receiptImage,
+    double? quantityOriginal,
+    String? unitOriginal,
+    double? quantityBase,
+    String? unitBase,
     required String status,
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -334,10 +276,20 @@ class Expense {
       category: ExpenseCategory.fromString(category),
       notes: notes,
       receiptImage: receiptImage,
+      quantityOriginal: quantityOriginal,
+      unitOriginal: unitOriginal,
+      quantityBase: quantityBase,
+      unitBase: unitBase,
       status: ExpenseStatus.fromString(status),
       createdAt: createdAt,
       updatedAt: updatedAt,
     );
+  }
+
+  static String _formatQty(double v) {
+    if (v == v.roundToDouble()) return v.round().toString();
+    final s = v.toStringAsFixed(3);
+    return s.replaceFirst(RegExp(r'\.?0+$'), '');
   }
 
   // Calculated getters
@@ -377,6 +329,10 @@ class Expense {
       'category': category.displayName,
       'notes': notes,
       'receiptImage': receiptImage,
+      'quantityOriginal': quantityOriginal,
+      'unitOriginal': unitOriginal,
+      'quantityBase': quantityBase,
+      'unitBase': unitBase,
       'status': status.displayName,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
@@ -394,6 +350,10 @@ class Expense {
       category: json['category'],
       notes: json['notes'],
       receiptImage: json['receiptImage'],
+      quantityOriginal: (json['quantityOriginal'] as num?)?.toDouble(),
+      unitOriginal: json['unitOriginal'] as String?,
+      quantityBase: (json['quantityBase'] as num?)?.toDouble(),
+      unitBase: json['unitBase'] as String?,
       status: json['status'],
       createdAt: DateTime.parse(json['createdAt']),
       updatedAt: DateTime.parse(json['updatedAt']),
@@ -411,6 +371,10 @@ class Expense {
       category: data.category,
       notes: data.notes,
       receiptImage: data.receiptImage,
+      quantityOriginal: data.quantityOriginal,
+      unitOriginal: data.unitOriginal,
+      quantityBase: data.quantityBase,
+      unitBase: data.unitBase,
       status: data.status,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
@@ -425,6 +389,10 @@ class Expense {
     ExpenseCategory? category,
     String? notes,
     String? receiptImage,
+    double? quantityOriginal,
+    String? unitOriginal,
+    double? quantityBase,
+    String? unitBase,
     ExpenseStatus? status,
   }) {
     return Expense(
@@ -436,6 +404,10 @@ class Expense {
       category: category ?? this.category,
       notes: notes ?? this.notes,
       receiptImage: receiptImage ?? this.receiptImage,
+      quantityOriginal: quantityOriginal ?? this.quantityOriginal,
+      unitOriginal: unitOriginal ?? this.unitOriginal,
+      quantityBase: quantityBase ?? this.quantityBase,
+      unitBase: unitBase ?? this.unitBase,
       status: status ?? this.status,
       createdAt: createdAt,
       updatedAt: DateTime.now(),

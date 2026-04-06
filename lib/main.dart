@@ -27,7 +27,9 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<ThemeProvider>.value(value: themeProvider),
-        ChangeNotifierProvider<DriftDatabaseProvider>.value(value: databaseProvider),
+        ChangeNotifierProvider<DriftDatabaseProvider>.value(
+          value: databaseProvider,
+        ),
         ChangeNotifierProvider<CurrencyProvider>.value(value: currencyProvider),
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
       ],
@@ -36,8 +38,42 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  bool _shouldLockOnResume = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _shouldLockOnResume = auth.isAuthenticated && auth.biometricEnabled;
+      return;
+    }
+    if (state == AppLifecycleState.resumed && _shouldLockOnResume) {
+      _shouldLockOnResume = false;
+      auth.requireBiometricUnlock();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,7 +82,7 @@ class MyApp extends StatelessWidget {
         // Show loading if database not ready
         if (!dbProvider.isInitialized) {
           return MaterialApp(
-            debugShowCheckedModeBanner:false,
+            debugShowCheckedModeBanner: false,
             home: Scaffold(
               body: Center(
                 child: Column(
@@ -68,20 +104,23 @@ class MyApp extends StatelessWidget {
         // Show error if database failed
         if (dbProvider.error != null) {
           return MaterialApp(
-            debugShowCheckedModeBanner:false,
+            debugShowCheckedModeBanner: false,
             home: Scaffold(
               body: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                    const Icon(
+                      Icons.error_outline,
+                      size: 48,
+                      color: Colors.red,
+                    ),
                     const SizedBox(height: 16),
                     Text('Database Error: ${dbProvider.error}'),
                     const SizedBox(height: 16),
                     ElevatedButton(
-                      onPressed: () {
-                        // Retry initialization
-                        // You might want to add a retry method
+                      onPressed: () async {
+                        await dbProvider.initializeDriftDatabase();
                       },
                       child: const Text('Retry'),
                     ),

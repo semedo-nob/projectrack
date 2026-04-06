@@ -7,6 +7,7 @@ import 'package:projectrack1/providers/auth_provider.dart';
 import 'package:projectrack1/widgets/bottom_bar.dart';
 
 import '../splash_screen.dart';
+import '../ui/auth/biometric_unlock_screen.dart';
 import '../ui/auth/login_screen.dart';
 import '../ui/auth/register_screen.dart';
 import '../ui/onboarding/onboarding1.dart';
@@ -26,11 +27,13 @@ import '../ui/screens/notifications.dart';
 import '../ui/screens/profile.dart';
 import '../ui/screens/reports.dart';
 import '../ui/screens/settings.dart';
+import '../ui/screens/settings_unit_screen.dart';
 
 class AppRoutes {
   static const String splash = '/';
   static const String login = '/login';
   static const String register = '/register';
+  static const String unlock = '/unlock';
   static const String createProject = '/create-project';
   static const String projectOverview = '/project/:id';
   static const String dailyMaterialEntry = '/project/:id/material-entry';
@@ -45,6 +48,7 @@ class AppRoutes {
   static const String notifications = '/notifications';
   static const String profile = '/profile';
   static const String settings = '/settings';
+  static const String unitSettings = '/settings/units';
 
   // Nested routes
   static const String projectDetails = '/projects/:id';
@@ -54,7 +58,8 @@ class AppRoutes {
   static const String receiptGallery = '/receipt-gallery'; // Add this route
   static const String projectReceiptGallery = '/project/:id/receipt-gallery';
   static const String receiptDetail = '/receipt/:id'; // Add this route
-  static const String projectReceiptDetail = '/project/:projectId/receipt/:receiptId';
+  static const String projectReceiptDetail =
+      '/project/:projectId/receipt/:receiptId';
   static const String reportsAnalytics = '/reports'; // Add this route
   static const String projectReports = '/project/:id/reports';
 }
@@ -65,10 +70,12 @@ final GoRouter router = GoRouter(
   redirect: (BuildContext context, GoRouterState state) {
     final auth = Provider.of<AuthProvider>(context, listen: false);
     final isAuth = auth.isAuthenticated;
+    final needsUnlock = auth.needsBiometricUnlock;
     final isInitial = auth.status == AuthStatus.initial;
     final isLoading = auth.status == AuthStatus.loading;
     final path = state.uri.path;
-    final isPublic = path == AppRoutes.splash ||
+    final isPublic =
+        path == AppRoutes.splash ||
         path == AppRoutes.login ||
         path == AppRoutes.register ||
         path.startsWith(AppRoutes.onboarding) ||
@@ -76,7 +83,12 @@ final GoRouter router = GoRouter(
         path == AppRoutes.onboarding3;
     if (isInitial || isLoading) return null;
     if (!isAuth && !isPublic) return AppRoutes.login;
-    if (isAuth && (path == AppRoutes.login || path == AppRoutes.register)) return AppRoutes.home;
+    if (isAuth && needsUnlock && path != AppRoutes.unlock)
+      return AppRoutes.unlock;
+    if (isAuth && !needsUnlock && path == AppRoutes.unlock)
+      return AppRoutes.home;
+    if (isAuth && (path == AppRoutes.login || path == AppRoutes.register))
+      return AppRoutes.home;
     return null;
   },
   routes: [
@@ -91,9 +103,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return FadeTransition(
               opacity: animation,
@@ -118,9 +131,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -142,9 +156,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -168,6 +183,12 @@ final GoRouter router = GoRouter(
       builder: (context, state) => const LoginScreen(),
     ),
 
+    GoRoute(
+      path: AppRoutes.unlock,
+      name: 'unlock',
+      builder: (context, state) => const BiometricUnlockScreen(),
+    ),
+
     // Register Screen
     GoRoute(
       path: AppRoutes.register,
@@ -187,9 +208,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -212,9 +234,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return FadeTransition(
               opacity: animation,
@@ -235,10 +258,7 @@ final GoRouter router = GoRouter(
       builder: (context, state) {
         final id = state.pathParameters['id'] ?? '';
         final projectName = state.extra as String? ?? 'Project Details';
-        return ProjectOverviewScreen(
-          projectId: id,
-          projectName: projectName,
-        );
+        return ProjectOverviewScreen(projectId: id, projectName: projectName);
       },
     ),
 
@@ -260,9 +280,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -291,9 +312,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return FadeTransition(
               opacity: animation,
@@ -319,9 +341,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return FadeTransition(
               opacity: animation,
@@ -339,7 +362,7 @@ final GoRouter router = GoRouter(
     // Home with Bottom Navigation Bar
     // In your app_route.dart, replace the home route with:
 
-// Home with Bottom Navigation Bar
+    // Home with Bottom Navigation Bar
     GoRoute(
       path: AppRoutes.home,
       name: 'home',
@@ -363,7 +386,10 @@ final GoRouter router = GoRouter(
                 icon: Icons.receipt_long_outlined,
                 selectedIcon: Icons.receipt_long_rounded,
                 label: 'Expense',
-                screen: const CategorizedExpensesScreen(projectId: 'default', projectName: 'Default'),
+                screen: const CategorizedExpensesScreen(
+                  projectId: 'default',
+                  projectName: 'Default',
+                ),
               ),
               BottomBarItem(
                 icon: Icons.person_outlined,
@@ -378,9 +404,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -396,7 +423,13 @@ final GoRouter router = GoRouter(
       name: 'categorized-expenses',
       pageBuilder: (context, state) {
         final id = state.pathParameters['id'] ?? '';
-        final projectName = state.extra as String? ?? 'Project Details';
+        var projectName = 'Project Details';
+        final extra = state.extra;
+        if (extra is String) {
+          projectName = extra;
+        } else if (extra is Map && extra['projectName'] is String) {
+          projectName = extra['projectName'] as String;
+        }
 
         return CustomTransitionPage(
           child: CategorizedExpensesScreen(
@@ -408,9 +441,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -421,7 +455,6 @@ final GoRouter router = GoRouter(
       },
     ),
 
-
     GoRoute(
       path: AppRoutes.receiptOcr,
       name: 'receipt-ocr',
@@ -429,23 +462,67 @@ final GoRouter router = GoRouter(
         final extra = state.extra;
         String? imagePath;
         String? projectId;
+        String? projectName;
         if (extra is Map<String, dynamic>) {
           imagePath = extra['imagePath'] as String?;
           projectId = extra['projectId'] as String?;
+          projectName = extra['projectName'] as String?;
         }
         return CustomTransitionPage(
           child: ReceiptOcrScreen(
             initialImagePath: imagePath,
             initialProjectId: projectId,
+            projectId: projectId,
+            projectName: projectName,
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
+
+            return SlideTransition(
+              position: animation.drive(tween),
+              child: child,
             );
+          },
+        );
+      },
+    ),
+
+    // Project-scoped receipt OCR: /project/:id/receipt-ocr
+    GoRoute(
+      path: AppRoutes.projectReceiptOcr,
+      name: 'project-receipt-ocr',
+      pageBuilder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final extra = state.extra;
+        String? imagePath;
+        String? projectName;
+        if (extra is Map<String, dynamic>) {
+          imagePath = extra['imagePath'] as String?;
+          projectName = extra['projectName'] as String?;
+        }
+        return CustomTransitionPage(
+          child: ReceiptOcrScreen(
+            initialImagePath: imagePath,
+            initialProjectId: id.isNotEmpty ? id : null,
+            projectId: id.isNotEmpty ? id : null,
+            projectName: projectName,
+          ),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            const begin = Offset(1.0, 0.0);
+            const end = Offset.zero;
+            const curve = Curves.easeOutCubic;
+
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -467,9 +544,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -486,17 +564,16 @@ final GoRouter router = GoRouter(
         final receiptId = state.pathParameters['id'] ?? '';
 
         return CustomTransitionPage(
-          child: ReceiptDetailScreen(
-            receiptId: receiptId,
-          ),
+          child: ReceiptDetailScreen(receiptId: receiptId),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -517,9 +594,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -544,9 +622,10 @@ final GoRouter router = GoRouter(
             const begin = Offset(1.0, 0.0);
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
             return SlideTransition(
               position: animation.drive(tween),
               child: child,
@@ -567,9 +646,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -590,9 +670,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -614,9 +695,10 @@ final GoRouter router = GoRouter(
             const end = Offset.zero;
             const curve = Curves.easeOutCubic;
 
-            var tween = Tween(begin: begin, end: end).chain(
-              CurveTween(curve: curve),
-            );
+            var tween = Tween(
+              begin: begin,
+              end: end,
+            ).chain(CurveTween(curve: curve));
 
             return SlideTransition(
               position: animation.drive(tween),
@@ -625,6 +707,23 @@ final GoRouter router = GoRouter(
           },
         );
       },
+    ),
+    GoRoute(
+      path: AppRoutes.unitSettings,
+      name: 'unitSettings',
+      pageBuilder: (context, state) => CustomTransitionPage(
+        child: const SettingsUnitScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          const begin = Offset(1.0, 0.0);
+          const end = Offset.zero;
+          final tween = Tween(begin: begin, end: end)
+              .chain(CurveTween(curve: Curves.easeOutCubic));
+          return SlideTransition(
+            position: animation.drive(tween),
+            child: child,
+          );
+        },
+      ),
     ),
   ],
 );

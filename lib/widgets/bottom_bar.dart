@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../providers/theme_provider.dart';
+import '../providers/drift_database_provider.dart';
 import '../routes/app_routes.dart';
 
 class BottomBarItem {
@@ -43,6 +44,7 @@ class _MainScaffoldState extends State<MainScaffold>
     with TickerProviderStateMixin {
   late PageController _pageController;
   late int _currentIndex;
+  String? _currentProjectId; // Track current project context
 
   // Glimmer animation for FAB
   late AnimationController _glimmerController;
@@ -66,6 +68,21 @@ class _MainScaffoldState extends State<MainScaffold>
         curve: Curves.easeInOutSine,
       ),
     );
+
+    // Listen for project context changes
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateProjectContext();
+    });
+  }
+
+  void _updateProjectContext() {
+    // Try to get current project from database provider
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    if (db.currentProject != null) {
+      setState(() {
+        _currentProjectId = db.currentProject!.id;
+      });
+    }
   }
 
   @override
@@ -99,9 +116,26 @@ class _MainScaffoldState extends State<MainScaffold>
     final status = await Permission.camera.request();
     if (status.isGranted) {
       final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(source: ImageSource.camera);
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+      );
+
       if (image != null && mounted) {
-        context.push(AppRoutes.receiptOcr, extra: {'imagePath': image.path});
+        if (_currentProjectId != null && _currentProjectId!.isNotEmpty) {
+          final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+          await db.loadProject(_currentProjectId!);
+          final projectName = db.currentProject?.name;
+          context.push(
+            AppRoutes.projectReceiptOcr.replaceFirst(':id', _currentProjectId!),
+            extra: {'imagePath': image.path, 'projectName': projectName},
+          );
+        } else {
+          context.push(
+            AppRoutes.receiptOcr,
+            extra: {'imagePath': image.path},
+          );
+        }
       }
     } else if (status.isPermanentlyDenied) {
       _showPermissionDialog();
@@ -110,9 +144,26 @@ class _MainScaffoldState extends State<MainScaffold>
 
   Future<void> _scanReceiptFromGallery() async {
     final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+
     if (image != null && mounted) {
-      context.push(AppRoutes.receiptOcr, extra: {'imagePath': image.path});
+      if (_currentProjectId != null && _currentProjectId!.isNotEmpty) {
+        final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+        await db.loadProject(_currentProjectId!);
+        final projectName = db.currentProject?.name;
+        context.push(
+          AppRoutes.projectReceiptOcr.replaceFirst(':id', _currentProjectId!),
+          extra: {'imagePath': image.path, 'projectName': projectName},
+        );
+      } else {
+        context.push(
+          AppRoutes.receiptOcr,
+          extra: {'imagePath': image.path},
+        );
+      }
     }
   }
 
@@ -139,8 +190,21 @@ class _MainScaffoldState extends State<MainScaffold>
     );
   }
 
-  void _showActionBottomSheet() {
+  Future<void> _showActionBottomSheet() async {
     final isDark = Provider.of<ThemeProvider>(context, listen: false).isDarkMode(context);
+
+    // Refresh project context
+    _updateProjectContext();
+
+    // Get project name if available
+    String? projectName;
+    if (_currentProjectId != null) {
+      final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+      await db.loadProject(_currentProjectId!);
+      projectName = db.currentProject?.name;
+    }
+
+    if (!mounted) return;
 
     showModalBottomSheet(
       context: context,
@@ -169,7 +233,7 @@ class _MainScaffoldState extends State<MainScaffold>
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
               child: Text(
-                'Create New',
+                'What would you like to do?',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -177,6 +241,8 @@ class _MainScaffoldState extends State<MainScaffold>
                 ),
               ),
             ),
+
+            // Create Project Option
             _buildBottomSheetOption(
               isDark: isDark,
               icon: Icons.create_new_folder_rounded,
@@ -188,28 +254,57 @@ class _MainScaffoldState extends State<MainScaffold>
                 context.push(AppRoutes.createProject);
               },
             ),
+
+            // Divider
+            const Divider(height: 1, indent: 20, endIndent: 20),
+
+            // Camera Option
             _buildBottomSheetOption(
               isDark: isDark,
               icon: Icons.camera_alt_rounded,
-              iconColor: AppColors.secondary,
-              title: 'Scan Receipt (Camera)',
-              subtitle: 'Take a photo of your receipt',
+              iconColor: AppColors.primary,
+              title: 'Scan Receipt with Camera',
+              subtitle: _currentProjectId != null
+                  ? 'Attach to ${projectName ?? 'current project'}'
+                  : 'Take a photo of your receipt',
               onTap: () {
                 Navigator.pop(context);
                 _scanReceiptWithCamera();
               },
             ),
+
+            // Gallery Option
             _buildBottomSheetOption(
               isDark: isDark,
               icon: Icons.photo_library_rounded,
               iconColor: AppColors.secondary,
-              title: 'Scan Receipt (Gallery)',
-              subtitle: 'Choose a receipt image from gallery',
+              title: 'Choose from Gallery',
+              subtitle: _currentProjectId != null
+                  ? 'Select receipt for ${projectName ?? 'current project'}'
+                  : 'Select an existing receipt image',
               onTap: () {
                 Navigator.pop(context);
                 _scanReceiptFromGallery();
               },
             ),
+
+            // Quick Material Entry (if in project context)
+            if (_currentProjectId != null)
+              _buildBottomSheetOption(
+                isDark: isDark,
+                icon: Icons.inventory_2_rounded,
+                iconColor: AppColors.info,
+                title: 'Quick Material Entry',
+                subtitle: 'Add materials to ${projectName ?? 'project'}',
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push(
+                    '/project/$_currentProjectId/material-entry',
+                    extra: projectName,
+                  );
+                },
+              ),
+
             const SizedBox(height: 24),
           ],
         ),
@@ -309,7 +404,7 @@ class _MainScaffoldState extends State<MainScaffold>
   Widget _buildBottomBar(bool isDark) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16, left: 20, right: 20),
-      height: 70, // Fixed height
+      height: 70,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(35),
         child: BackdropFilter(
@@ -347,7 +442,7 @@ class _MainScaffoldState extends State<MainScaffold>
                 // Projects Tab
                 _buildNavItem(index: 1, isDark: isDark, item: widget.items[1]),
 
-                // FAB in the middle (same size as tabs)
+                // FAB in the middle
                 _buildFabItem(isDark),
 
                 // Expense Tab
@@ -415,47 +510,43 @@ class _MainScaffoldState extends State<MainScaffold>
         builder: (context, child) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [
-                        AppColors.primary,
-                        AppColors.primaryLight,
+            child: GestureDetector(
+              onTap: _showActionBottomSheet,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [
+                          AppColors.primary,
+                          AppColors.primaryLight,
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withOpacity(_glimmerAnimation.value * 0.7),
+                          blurRadius: 12 * _glimmerAnimation.value,
+                          spreadRadius: 2 * _glimmerAnimation.value,
+                        ),
                       ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
                     ),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.primary.withOpacity(_glimmerAnimation.value * 0.7),
-                        blurRadius: 12 * _glimmerAnimation.value,
-                        spreadRadius: 2 * _glimmerAnimation.value,
-                      ),
-                    ],
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: _showActionBottomSheet,
-                      customBorder: const CircleBorder(),
-                      child: const Icon(
-                        Icons.add_rounded,
-                        color: Colors.black,
-                        size: 22,
-                      ),
+                    child: const Icon(
+                      Icons.add_rounded,
+                      color: Colors.black,
+                      size: 22,
                     ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                const SizedBox(height: 4),
-              ],
+                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
+                ],
+              ),
             ),
           );
         },

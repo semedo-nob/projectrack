@@ -15,13 +15,7 @@ const String _prefUserName = 'user_profile_name';
 const String _prefUserEmail = 'user_profile_email';
 const String _prefUserAvatarUrl = 'user_profile_avatar_url';
 
-enum AuthStatus {
-  initial,
-  authenticated,
-  unauthenticated,
-  loading,
-  error,
-}
+enum AuthStatus { initial, authenticated, unauthenticated, loading, error }
 
 class AuthProvider extends ChangeNotifier {
   final db.AppDatabase _database;
@@ -33,6 +27,9 @@ class AuthProvider extends ChangeNotifier {
   String? _errorMessage;
   bool _isBiometricAvailable = false;
   bool _biometricEnabled = false;
+  bool _needsBiometricUnlock = false;
+  bool _hasStoredBiometricAccount = false;
+  String? _lastBiometricEmail;
 
   AuthProvider({required db.AppDatabase database}) : _database = database {
     _init();
@@ -45,6 +42,9 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _status == AuthStatus.authenticated;
   bool get isBiometricAvailable => _isBiometricAvailable;
   bool get biometricEnabled => _biometricEnabled;
+  bool get needsBiometricUnlock => _needsBiometricUnlock;
+  bool get hasStoredBiometricAccount => _hasStoredBiometricAccount;
+  String? get lastBiometricEmail => _lastBiometricEmail;
 
   Future<void> _init() async {
     await _checkBiometricAvailability();
@@ -62,18 +62,28 @@ class AuthProvider extends ChangeNotifier {
     try {
       final token = await _secureStorage.getAuthToken();
       final userId = await _secureStorage.getUserId();
+      final biometricUserId = await _secureStorage.getBiometricUserId();
+      final biometricUserEmail = await _secureStorage.getBiometricUserEmail();
       final biometricPref = await _secureStorage.getBiometricPreference();
 
       _biometricEnabled = biometricPref ?? false;
+      _hasStoredBiometricAccount =
+          _biometricEnabled && biometricUserId != null;
+      _lastBiometricEmail = biometricUserEmail;
 
       if (token != null && userId != null) {
         // Validate token with backend or check local session
         await _loadUserFromDatabase(userId);
 
         if (_currentUser != null) {
+          _needsBiometricUnlock = _biometricEnabled && _isBiometricAvailable;
           setStatus(AuthStatus.authenticated);
         } else {
-          await logout();
+          await _secureStorage.clearSession();
+          await _clearUserPrefs();
+          _currentUser = null;
+          _needsBiometricUnlock = false;
+          setStatus(AuthStatus.unauthenticated);
         }
       } else {
         setStatus(AuthStatus.unauthenticated);
@@ -86,8 +96,9 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _loadUserFromDatabase(String userId) async {
     try {
-      final userData = await (_database.select(_database.users)
-        ..where((t) => t.id.equals(userId))).getSingleOrNull();
+      final userData = await (_database.select(
+        _database.users,
+      )..where((t) => t.id.equals(userId))).getSingleOrNull();
 
       if (userData != null) {
         _currentUser = User.fromDrift(userData);
@@ -132,14 +143,26 @@ class AuthProvider extends ChangeNotifier {
     setStatus(AuthStatus.loading);
 
     try {
-      final userData = await (_database.select(_database.users)
-        ..where((t) => t.email.equals(email))).getSingleOrNull();
+      final userData = await (_database.select(
+        _database.users,
+      )..where((t) => t.email.equals(email))).getSingleOrNull();
 
-      if (userData != null && _verifyPassword(password, userData.passwordHash)) {
+      if (userData != null &&
+          _verifyPassword(password, userData.passwordHash)) {
         _currentUser = User.fromDrift(userData);
-        await _secureStorage.saveAuthToken('session_${DateTime.now().millisecondsSinceEpoch}');
+        await _secureStorage.saveAuthToken(
+          'session_${DateTime.now().millisecondsSinceEpoch}',
+        );
         await _secureStorage.saveUserId(_currentUser!.id);
+        await _secureStorage.saveUserEmail(_currentUser!.email);
+        if (_biometricEnabled) {
+          await _secureStorage.saveBiometricUserId(_currentUser!.id);
+          await _secureStorage.saveBiometricUserEmail(_currentUser!.email);
+        }
         await _saveUserToPrefs(_currentUser!);
+        _hasStoredBiometricAccount = _biometricEnabled;
+        _lastBiometricEmail = _currentUser!.email;
+        _needsBiometricUnlock = false;
         setStatus(AuthStatus.authenticated);
         return true;
       }
@@ -155,10 +178,14 @@ class AuthProvider extends ChangeNotifier {
 
   Future<bool> loginWithBiometrics() async {
     if (!_isBiometricAvailable) {
-      setError('Biometric authentication not available');
+      setError(
+        _biometricService.lastError ??
+            'Biometric authentication is not available on this device',
+      );
       return false;
     }
 
+    final hadSession = _currentUser != null;
     setStatus(AuthStatus.loading);
 
     try {
@@ -166,12 +193,23 @@ class AuthProvider extends ChangeNotifier {
 
       if (authenticated) {
         // Get stored user ID
-        final userId = await _secureStorage.getUserId();
+        final userId = await _secureStorage.getBiometricUserId();
 
         if (userId != null) {
           await _loadUserFromDatabase(userId);
 
           if (_currentUser != null) {
+            await _secureStorage.saveAuthToken(
+              'session_${DateTime.now().millisecondsSinceEpoch}',
+            );
+            await _secureStorage.saveUserId(_currentUser!.id);
+            await _secureStorage.saveUserEmail(_currentUser!.email);
+            await _secureStorage.saveBiometricUserId(_currentUser!.id);
+            await _secureStorage.saveBiometricUserEmail(_currentUser!.email);
+            await _saveUserToPrefs(_currentUser!);
+            _hasStoredBiometricAccount = true;
+            _lastBiometricEmail = _currentUser!.email;
+            _needsBiometricUnlock = false;
             setStatus(AuthStatus.authenticated);
             return true;
           }
@@ -181,13 +219,30 @@ class AuthProvider extends ChangeNotifier {
         setStatus(AuthStatus.unauthenticated);
         return false;
       } else {
-        setError('Biometric authentication failed');
-        setStatus(AuthStatus.unauthenticated);
+        final message =
+            _biometricService.lastError ?? 'Biometric authentication failed';
+        if (hadSession) {
+          _errorMessage = message;
+          _needsBiometricUnlock = true;
+          _status = AuthStatus.authenticated;
+          notifyListeners();
+        } else {
+          setError(message);
+          setStatus(AuthStatus.unauthenticated);
+        }
         return false;
       }
     } catch (e) {
-      setError('Biometric authentication error: $e');
-      setStatus(AuthStatus.unauthenticated);
+      final message = 'Biometric authentication error: $e';
+      if (hadSession) {
+        _errorMessage = message;
+        _needsBiometricUnlock = true;
+        _status = AuthStatus.authenticated;
+        notifyListeners();
+      } else {
+        setError(message);
+        setStatus(AuthStatus.unauthenticated);
+      }
       return false;
     }
   }
@@ -201,8 +256,9 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       // Check if user already exists
-      final existingUser = await (_database.select(_database.users)
-        ..where((t) => t.email.equals(email))).getSingleOrNull();
+      final existingUser = await (_database.select(
+        _database.users,
+      )..where((t) => t.email.equals(email))).getSingleOrNull();
 
       if (existingUser != null) {
         setError('Email already registered');
@@ -236,9 +292,17 @@ class AuthProvider extends ChangeNotifier {
   Future<void> logout() async {
     setStatus(AuthStatus.loading);
     try {
-      await _secureStorage.clearAll();
+      await _secureStorage.clearSession();
+      if (!_biometricEnabled) {
+        await _secureStorage.clearBiometricLoginIdentity();
+      }
       await _clearUserPrefs();
       _currentUser = null;
+      _needsBiometricUnlock = false;
+      _hasStoredBiometricAccount = _biometricEnabled;
+      if (!_biometricEnabled) {
+        _lastBiometricEmail = null;
+      }
       setStatus(AuthStatus.unauthenticated);
     } catch (e) {
       setError('Logout failed: $e');
@@ -263,16 +327,18 @@ class AuthProvider extends ChangeNotifier {
         avatarUrl: avatarUrl,
       );
 
-      await (_database.update(_database.users)
-        ..where((t) => t.id.equals(_currentUser!.id))
-      ).write(db.UsersCompanion(
-        name: drift.Value(updatedUser.name),
-        email: drift.Value(updatedUser.email),
-        avatarUrl: updatedUser.avatarUrl != null
-            ? drift.Value(updatedUser.avatarUrl)
-            : const drift.Value.absent(),
-        updatedAt: drift.Value(DateTime.now()),
-      ));
+      await (_database.update(
+        _database.users,
+      )..where((t) => t.id.equals(_currentUser!.id))).write(
+        db.UsersCompanion(
+          name: drift.Value(updatedUser.name),
+          email: drift.Value(updatedUser.email),
+          avatarUrl: updatedUser.avatarUrl != null
+              ? drift.Value(updatedUser.avatarUrl)
+              : const drift.Value.absent(),
+          updatedAt: drift.Value(DateTime.now()),
+        ),
+      );
 
       _currentUser = updatedUser;
       await _saveUserToPrefs(updatedUser);
@@ -296,20 +362,24 @@ class AuthProvider extends ChangeNotifier {
     setStatus(AuthStatus.loading);
 
     try {
-      final userRow = await (_database.select(_database.users)
-        ..where((t) => t.id.equals(_currentUser!.id))).getSingleOrNull();
-      if (userRow == null || !_verifyPassword(oldPassword, userRow.passwordHash)) {
+      final userRow = await (_database.select(
+        _database.users,
+      )..where((t) => t.id.equals(_currentUser!.id))).getSingleOrNull();
+      if (userRow == null ||
+          !_verifyPassword(oldPassword, userRow.passwordHash)) {
         setError('Current password is incorrect');
         setStatus(AuthStatus.authenticated);
         return false;
       }
 
-      await (_database.update(_database.users)
-        ..where((t) => t.id.equals(_currentUser!.id))
-      ).write(db.UsersCompanion(
-        passwordHash: drift.Value(_hashPassword(newPassword)),
-        updatedAt: drift.Value(DateTime.now()),
-      ));
+      await (_database.update(
+        _database.users,
+      )..where((t) => t.id.equals(_currentUser!.id))).write(
+        db.UsersCompanion(
+          passwordHash: drift.Value(_hashPassword(newPassword)),
+          updatedAt: drift.Value(DateTime.now()),
+        ),
+      );
 
       setStatus(AuthStatus.authenticated);
       return true;
@@ -321,9 +391,50 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // Biometric preference
-  Future<void> toggleBiometric(bool enabled) async {
+  Future<bool> toggleBiometric(bool enabled) async {
+    if (enabled && !_isBiometricAvailable) {
+      setError(
+        _biometricService.lastError ??
+            'Biometric authentication is not available on this device',
+      );
+      return false;
+    }
+    if (enabled) {
+      final verified = await _biometricService.authenticate();
+      if (!verified) {
+        setError(
+          _biometricService.lastError ??
+              'Biometric verification is required before enabling app lock.',
+        );
+        return false;
+      }
+    }
     _biometricEnabled = enabled;
     await _secureStorage.saveBiometricPreference(enabled);
+    if (enabled && _currentUser != null) {
+      await _secureStorage.saveBiometricUserId(_currentUser!.id);
+      await _secureStorage.saveBiometricUserEmail(_currentUser!.email);
+      _hasStoredBiometricAccount = true;
+      _lastBiometricEmail = _currentUser!.email;
+    } else if (!enabled) {
+      await _secureStorage.clearBiometricLoginIdentity();
+      _hasStoredBiometricAccount = false;
+      _lastBiometricEmail = null;
+    }
+    _needsBiometricUnlock = enabled && _currentUser != null;
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> requireBiometricUnlock() async {
+    if (_biometricEnabled && _currentUser != null && _isBiometricAvailable) {
+      _needsBiometricUnlock = true;
+      notifyListeners();
+    }
+  }
+
+  Future<void> dismissBiometricLock() async {
+    _needsBiometricUnlock = false;
     notifyListeners();
   }
 
@@ -340,7 +451,8 @@ class AuthProvider extends ChangeNotifier {
     if (storedHash.isEmpty) return false;
     // SHA-256 hex digest is 64 chars; legacy plain-text passwords are shorter
     if (storedHash.length == 64) return _hashPassword(plain) == storedHash;
-    return plain == storedHash; // legacy plain-text (migrate on next password change)
+    return plain ==
+        storedHash; // legacy plain-text (migrate on next password change)
   }
 
   void setStatus(AuthStatus newStatus) {

@@ -1,5 +1,6 @@
 // lib/providers/currency_provider.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:projectrack1/database/database.dart' as db;
 
 /// Supported currencies with code and display symbol.
@@ -78,7 +79,7 @@ class CurrencyProvider extends ChangeNotifier {
   /// Format amount with current currency symbol (e.g. "KSh 1,234.56").
   String format(double amount) {
     final sym = symbol;
-    final str = amount.toStringAsFixed(2);
-    return '$sym $str';
+    final formatted = NumberFormat('#,##0.00', 'en_US').format(amount);
+    return '$sym $formatted';
   }
 }

@@ -48,13 +48,48 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
   bool _isSaving = false;
   double? _ocrConfidence;
   String? _ocrErrorMessage;
+  bool _isValidReceipt = false;
+  Map<String, dynamic> _validationResults = {};
+
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
   // Common merchant names for better recognition
   final List<String> _commonMerchants = [
     'Walmart', 'Target', 'Costco', 'Home Depot', 'Lowe\'s',
     'Starbucks', 'McDonald\'s', 'Amazon', 'Uber', 'Lyft',
-    'Shell', 'Exxon', 'CVS', 'Walgreens', 'Kroger', 'Safeway'
+    'Shell', 'Exxon', 'CVS', 'Walgreens', 'Kroger', 'Safeway',
+    'Whole Foods', 'Trader Joe\'s', 'Best Buy', 'Apple Store',
+    'Office Depot', 'Staples', 'Ace Hardware', 'Menards'
+  ];
+
+  // Keywords that indicate a receipt
+  final List<String> _receiptKeywords = [
+    'receipt', 'invoice', 'bill', 'purchase', 'sale', 'payment',
+    'total', 'amount', 'subtotal', 'tax', 'cash', 'change',
+    'thank you', 'store', 'merchant', 'customer', 'order',
+    'transaction', 'card', 'visa', 'mastercard', 'amex',
+    'cashier', 'register', 'terminal', 'authorization'
+  ];
+
+  // Keywords that might indicate non-receipt images
+  final List<String> _rejectionKeywords = [
+    'selfie', 'profile', 'avatar', 'photo of me', 'my picture',
+    'screenshot', 'screen capture', 'instagram', 'facebook',
+    'whatsapp', 'snapchat', 'memes', 'funny', 'wallpaper'
+  ];
+
+  // Date patterns that should be present in a receipt
+  final List<RegExp> _receiptDatePatterns = [
+    RegExp(r'date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+    RegExp(r'transaction\s+date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+    RegExp(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+  ];
+
+  // Amount patterns that should be present
+  final List<RegExp> _receiptAmountPatterns = [
+    RegExp(r'total:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
+    RegExp(r'amount:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
+    RegExp(r'balance due:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
   ];
 
   @override
@@ -144,6 +179,8 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           _imagePath = image.path;
           _ocrConfidence = null;
           _ocrErrorMessage = null;
+          _isValidReceipt = false;
+          _validationResults = {};
         });
         _runOcr(image.path);
       }
@@ -171,6 +208,8 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           _imagePath = image.path;
           _ocrConfidence = null;
           _ocrErrorMessage = null;
+          _isValidReceipt = false;
+          _validationResults = {};
         });
         _runOcr(image.path);
       }
@@ -186,11 +225,90 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
     }
   }
 
+  bool _validateReceipt(String text) {
+    final lowerText = text.toLowerCase();
+    final results = <String, bool>{};
+
+    // Check for receipt keywords (at least 2 should match)
+    int receiptKeywordCount = 0;
+    for (final keyword in _receiptKeywords) {
+      if (lowerText.contains(keyword)) {
+        receiptKeywordCount++;
+      }
+    }
+    results['receiptKeywords'] = receiptKeywordCount >= 2;
+
+    // Check for rejection keywords (if any match, reject immediately)
+    for (final keyword in _rejectionKeywords) {
+      if (lowerText.contains(keyword)) {
+        results['rejectionKeywords'] = false;
+        _validationResults = results;
+        return false;
+      }
+    }
+    results['rejectionKeywords'] = true;
+
+    // Check for date patterns
+    bool hasDate = false;
+    for (final pattern in _receiptDatePatterns) {
+      if (pattern.hasMatch(text)) {
+        hasDate = true;
+        break;
+      }
+    }
+    results['hasDate'] = hasDate;
+
+    // Check for amount patterns
+    bool hasAmount = false;
+    for (final pattern in _receiptAmountPatterns) {
+      if (pattern.hasMatch(text)) {
+        hasAmount = true;
+        break;
+      }
+    }
+    results['hasAmount'] = hasAmount;
+
+    // Check for common merchant names
+    bool hasMerchant = false;
+    for (final merchant in _commonMerchants) {
+      if (lowerText.contains(merchant.toLowerCase())) {
+        hasMerchant = true;
+        break;
+      }
+    }
+    results['hasMerchant'] = hasMerchant;
+
+    // Check for typical receipt structure (multiple lines, numbers)
+    final lines = text.split('\n').where((l) => l.trim().isNotEmpty).length;
+    results['hasMultipleLines'] = lines > 5;
+
+    // Check for currency symbols
+    results['hasCurrency'] = text.contains(RegExp(r'[\$\€\£]'));
+
+    // Check for numbers (receipts have many numbers)
+    final numbers = RegExp(r'\d+').allMatches(text).length;
+    results['hasNumbers'] = numbers > 10;
+
+    _validationResults = results;
+
+    // Overall validation: must have at least 3 of these conditions
+    int validConditions = [
+      results['receiptKeywords'] ?? false,
+      results['hasDate'] ?? false,
+      results['hasAmount'] ?? false,
+      results['hasMerchant'] ?? false,
+      results['hasCurrency'] ?? false,
+    ].where((v) => v).length;
+
+    return validConditions >= 3;
+  }
+
   Future<void> _runOcr(String path) async {
     if (!mounted) return;
     setState(() {
       _isProcessing = true;
       _ocrErrorMessage = null;
+      _isValidReceipt = false;
     });
 
     try {
@@ -200,28 +318,55 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
 
       if (!mounted) return;
 
-      // Calculate confidence based on text length and structure
-      double confidence = 0.7; // Base confidence
-      if (text.length > 50) confidence += 0.1;
-      if (text.contains(RegExp(r'\d+\.\d{2}'))) confidence += 0.1; // Has price
-      if (text.contains(RegExp(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}'))) confidence += 0.1; // Has date
+      // Validate if it's a receipt
+      final isValid = _validateReceipt(text);
+
+      // Calculate confidence based on validation results
+      double confidence = 0.0;
+      if (isValid) {
+        int totalConditions = _validationResults.length;
+        int trueConditions = _validationResults.values.where((v) => v).length;
+        confidence = trueConditions / totalConditions;
+      }
 
       setState(() {
         _isProcessing = false;
-        _ocrConfidence = confidence.clamp(0.0, 1.0);
+        _isValidReceipt = isValid;
+        _ocrConfidence = confidence;
       });
 
-      _parseAndFill(text);
+      if (isValid) {
+        _parseAndFill(text);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Receipt detected with ${(confidence * 100).toInt()}% confidence'),
+            backgroundColor: AppColors.success,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        setState(() {
+          _ocrErrorMessage = 'This doesn\'t appear to be a valid receipt. Please try again.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Not a valid receipt. Please capture a clear receipt image.'),
+            backgroundColor: AppColors.warning,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isProcessing = false;
+        _isValidReceipt = false;
         _ocrErrorMessage = 'OCR failed: ${e.toString().substring(0, min(50, e.toString().length))}';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('OCR failed. You can enter details manually.'),
+          content: Text('OCR failed. Please try again with a clearer image.'),
           backgroundColor: AppColors.warning,
           duration: const Duration(seconds: 3),
         ),
@@ -419,6 +564,11 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
       return;
     }
 
+    if (!_isValidReceipt) {
+      _showError('This does not appear to be a valid receipt. Please capture a proper receipt image.');
+      return;
+    }
+
     final merchant = _merchantController.text.trim();
     if (merchant.isEmpty) {
       _showError('Please enter merchant name.');
@@ -476,7 +626,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
             ? 'Scanned receipt'
             : _notesController.text.trim(),
         receiptImage: storedPath,
-        status: 'Logged',
+        status: 'logged',
       );
 
       if (!mounted) return;
@@ -593,18 +743,24 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: AppColors.success.withOpacity(0.1),
+                                color: _isValidReceipt
+                                    ? AppColors.success.withOpacity(0.1)
+                                    : AppColors.warning.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.check_circle, color: AppColors.success, size: 14),
+                                  Icon(
+                                    _isValidReceipt ? Icons.check_circle : Icons.warning_amber_rounded,
+                                    color: _isValidReceipt ? AppColors.success : AppColors.warning,
+                                    size: 14,
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
-                                    'Ready',
+                                    _isValidReceipt ? 'Valid Receipt' : 'Not Valid',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: AppColors.success,
+                                      color: _isValidReceipt ? AppColors.success : AppColors.warning,
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
@@ -619,6 +775,15 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                   ),
                 ),
               ),
+
+              // Validation Results
+              if (_validationResults.isNotEmpty && !_isProcessing)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  sliver: SliverToBoxAdapter(
+                    child: _buildValidationResults(isDark),
+                  ),
+                ),
 
               // Form section
               SliverPadding(
@@ -636,7 +801,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          if (_ocrConfidence != null && !_isProcessing)
+                          if (_ocrConfidence != null && !_isProcessing && _isValidReceipt)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
@@ -699,6 +864,73 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
     );
   }
 
+  Widget _buildValidationResults(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isValidReceipt ? AppColors.success : AppColors.warning,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Receipt Validation',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: _isValidReceipt ? AppColors.success : AppColors.warning,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._validationResults.entries.map((entry) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    entry.value ? Icons.check_circle : Icons.cancel,
+                    color: entry.value ? AppColors.success : AppColors.error,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _getValidationLabel(entry.key),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ],
+      ),
+    );
+  }
+
+  String _getValidationLabel(String key) {
+    switch (key) {
+      case 'receiptKeywords': return 'Contains receipt keywords';
+      case 'rejectionKeywords': return 'No rejection keywords found';
+      case 'hasDate': return 'Contains date';
+      case 'hasAmount': return 'Contains amount';
+      case 'hasMerchant': return 'Contains merchant name';
+      case 'hasMultipleLines': return 'Has multiple lines';
+      case 'hasCurrency': return 'Contains currency symbol';
+      case 'hasNumbers': return 'Contains numbers';
+      default: return key;
+    }
+  }
+
   Widget _buildReceiptImage(bool isDark) {
     return GestureDetector(
       onTap: _imagePath != null ? () => _showFullScreenImage() : null,
@@ -709,7 +941,10 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           borderRadius: BorderRadius.circular(16),
           color: isDark ? AppColors.darkCard : AppColors.lightCard,
           border: Border.all(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            color: _isValidReceipt
+                ? AppColors.success
+                : (_imagePath != null ? AppColors.warning : (isDark ? AppColors.darkBorder : AppColors.lightBorder)),
+            width: _isValidReceipt ? 2 : 1,
           ),
           boxShadow: [
             BoxShadow(
@@ -776,7 +1011,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
               ),
 
             // Camera/Gallery buttons
-            if (!_isProcessing)
+            if (!_isProcessing && _imagePath == null)
               Positioned(
                 bottom: 16,
                 left: 0,
@@ -799,6 +1034,31 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                       isPrimary: true,
                     ),
                   ],
+                ),
+              ),
+
+            // Retry button for invalid receipt
+            if (!_isProcessing && _imagePath != null && !_isValidReceipt)
+              Positioned(
+                bottom: 16,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: _buildActionButton(
+                    isDark: isDark,
+                    icon: Icons.refresh_rounded,
+                    label: 'Try Different Image',
+                    onTap: () {
+                      setState(() {
+                        _imagePath = null;
+                        _isValidReceipt = false;
+                        _validationResults = {};
+                        _merchantController.clear();
+                        _amountController.clear();
+                      });
+                    },
+                    isPrimary: false,
+                  ),
                 ),
               ),
           ],
@@ -1112,7 +1372,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: (_isProcessing || _isSaving) ? null : _saveExpense,
+            onPressed: (_isProcessing || _isSaving || !_isValidReceipt) ? null : _saveExpense,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.black,
@@ -1131,14 +1391,17 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
               ),
             )
-                : const Row(
+                : Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.save_rounded),
-                SizedBox(width: 8),
+                Icon(
+                  _isValidReceipt ? Icons.save_rounded : Icons.warning_rounded,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
                 Text(
-                  'Save Expense',
-                  style: TextStyle(
+                  _isValidReceipt ? 'Save Expense' : 'Invalid Receipt',
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),

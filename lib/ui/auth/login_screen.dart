@@ -6,6 +6,7 @@ import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
 
@@ -22,6 +23,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
   bool _isLoading = false;
+  bool _didSeedStoredEmail = false;
 
   @override
   void dispose() {
@@ -34,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (_formKey.currentState?.validate() ?? false) {
       setState(() => _isLoading = true);
       final auth = Provider.of<AuthProvider>(context, listen: false);
+      final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
       final ok = await auth.loginWithEmail(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -41,6 +44,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() => _isLoading = false);
       if (ok) {
+        final uid = auth.currentUser?.id;
+        if (uid != null) db.setActiveUserId(uid);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Login successful!'),
@@ -67,14 +72,50 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _handleBiometricLogin() async {
+    setState(() => _isLoading = true);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final ok = await auth.loginWithBiometrics();
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    if (ok) {
+      final uid = auth.currentUser?.id;
+      if (uid != null) db.setActiveUserId(uid);
+      context.go(AppRoutes.home);
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(auth.errorMessage ?? 'Biometric sign in failed'),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final auth = Provider.of<AuthProvider>(context);
+    if (!_didSeedStoredEmail &&
+        _emailController.text.isEmpty &&
+        (auth.lastBiometricEmail?.isNotEmpty ?? false)) {
+      _emailController.text = auth.lastBiometricEmail!;
+      _didSeedStoredEmail = true;
+    }
     final isDark = themeProvider.isDarkMode(context);
     final theme = Theme.of(context);
+    final showBiometricButton =
+        auth.isBiometricAvailable &&
+        auth.biometricEnabled &&
+        auth.hasStoredBiometricAccount;
 
     return Scaffold(
-      backgroundColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+      backgroundColor: isDark
+          ? AppColors.darkBackground
+          : AppColors.lightBackground,
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -96,6 +137,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Login Button
                   _buildLoginButton(theme, isDark),
+
+                  if (showBiometricButton) ...[
+                    const SizedBox(height: 18),
+                    _buildBiometricLoginCard(theme, isDark, auth),
+                  ],
 
                   const SizedBox(height: 32),
 
@@ -121,10 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                AppColors.primary,
-                AppColors.primaryLight,
-              ],
+              colors: [AppColors.primary, AppColors.primaryLight],
             ),
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
@@ -157,14 +200,91 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Manage projects, track expenses.',
+          'Manage projects, receipts, and cloud-safe backups.',
           style: TextStyle(
-            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            color: isDark
+                ? AppColors.darkTextSecondary
+                : AppColors.lightTextSecondary,
             fontSize: 16,
             fontWeight: FontWeight.normal,
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBiometricLoginCard(
+    ThemeData theme,
+    bool isDark,
+    AuthProvider auth,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : AppColors.lightBorder,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.fingerprint_rounded,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Quick unlock is ready',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      auth.lastBiometricEmail?.isNotEmpty ?? false
+                          ? 'Continue as ${auth.lastBiometricEmail}'
+                          : 'Use fingerprint or face unlock instead',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark
+                            ? AppColors.darkTextSecondary
+                            : AppColors.lightTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildBiometricButton(theme, isDark),
+        ],
+      ),
     );
   }
 
@@ -217,11 +337,15 @@ class _LoginScreenState extends State<LoginScreen> {
           decoration: InputDecoration(
             hintText: 'user@example.com',
             hintStyle: TextStyle(
-              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+              color: isDark
+                  ? AppColors.darkTextTertiary
+                  : AppColors.lightTextTertiary,
             ),
             prefixIcon: Icon(
               Icons.mail_outline_rounded,
-              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+              color: isDark
+                  ? AppColors.darkTextTertiary
+                  : AppColors.lightTextTertiary,
             ),
             prefixIconConstraints: const BoxConstraints(minWidth: 56),
             filled: true,
@@ -239,24 +363,15 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.primary,
-                width: 2,
-              ),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.error,
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: AppColors.error, width: 1),
             ),
             focusedErrorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.error,
-                width: 2,
-              ),
+              borderSide: const BorderSide(color: AppColors.error, width: 2),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
@@ -301,11 +416,15 @@ class _LoginScreenState extends State<LoginScreen> {
           decoration: InputDecoration(
             hintText: '••••••••',
             hintStyle: TextStyle(
-              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+              color: isDark
+                  ? AppColors.darkTextTertiary
+                  : AppColors.lightTextTertiary,
             ),
             prefixIcon: Icon(
               Icons.lock_outline_rounded,
-              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+              color: isDark
+                  ? AppColors.darkTextTertiary
+                  : AppColors.lightTextTertiary,
             ),
             prefixIconConstraints: const BoxConstraints(minWidth: 56),
             suffixIcon: IconButton(
@@ -313,7 +432,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 _isPasswordVisible
                     ? Icons.visibility_off_rounded
                     : Icons.visibility_rounded,
-                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                color: isDark
+                    ? AppColors.darkTextTertiary
+                    : AppColors.lightTextTertiary,
               ),
               onPressed: () {
                 setState(() {
@@ -336,24 +457,15 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.primary,
-                width: 2,
-              ),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
             ),
             errorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.error,
-                width: 1,
-              ),
+              borderSide: const BorderSide(color: AppColors.error, width: 1),
             ),
             focusedErrorBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(
-                color: AppColors.error,
-                width: 2,
-              ),
+              borderSide: const BorderSide(color: AppColors.error, width: 2),
             ),
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
@@ -371,40 +483,43 @@ class _LoginScreenState extends State<LoginScreen> {
       height: 56,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _handleLogin,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          foregroundColor: isDark ? AppColors.primaryDark : AppColors.lightText,
-          elevation: 4,
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30), // Rounded full
-          ),
-          shadowColor: AppColors.primary.withOpacity(0.3),
-        ).copyWith(
-          elevation: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.pressed)) return 2;
-            return 4;
-          }),
-        ),
+        style:
+            ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: isDark
+                  ? AppColors.primaryDark
+                  : AppColors.lightText,
+              elevation: 4,
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30), // Rounded full
+              ),
+              shadowColor: AppColors.primary.withOpacity(0.3),
+            ).copyWith(
+              elevation: MaterialStateProperty.resolveWith((states) {
+                if (states.contains(MaterialState.pressed)) return 2;
+                return 4;
+              }),
+            ),
         child: _isLoading
             ? SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.5,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              isDark ? AppColors.primaryDark : Colors.white,
-            ),
-          ),
-        )
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    isDark ? AppColors.primaryDark : Colors.white,
+                  ),
+                ),
+              )
             : const Text(
-          'Log In',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.5,
-          ),
-        ),
+                'Log In',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
       ),
     );
   }
@@ -416,7 +531,9 @@ class _LoginScreenState extends State<LoginScreen> {
         Text(
           "Don't have an account? ",
           style: TextStyle(
-            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            color: isDark
+                ? AppColors.darkTextSecondary
+                : AppColors.lightTextSecondary,
             fontSize: 14,
           ),
         ),
@@ -435,6 +552,30 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBiometricButton(ThemeData theme, bool isDark) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: _isLoading ? null : _handleBiometricLogin,
+        icon: const Icon(Icons.fingerprint_rounded),
+        label: const Text(
+          'Use Biometrics',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          side: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
     );
   }
 }

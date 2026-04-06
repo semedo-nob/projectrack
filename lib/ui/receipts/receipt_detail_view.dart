@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:projectrack1/constants/models/expense_model.dart';
+import 'package:projectrack1/service/export_service.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -762,11 +763,16 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
               ),
               title: const Text('Export as PDF'),
               subtitle: Text('Receipt from ${expense.merchant} - ${expense.formattedAmount}'),
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
+                final savedName = await ExportService.instance.exportReceiptPdf(
+                  expense: expense,
+                  projectName: _projectName,
+                );
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('PDF export started for ${expense.merchant}'),
+                    content: Text('Saved $savedName'),
                     backgroundColor: AppColors.info,
                     behavior: SnackBarBehavior.floating,
                   ),
@@ -782,13 +788,29 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 ),
                 child: const Icon(Icons.image_rounded, color: AppColors.success),
               ),
-              title: const Text('Export as Image'),
-              subtitle: Text('High-quality receipt image'),
-              onTap: () {
+              title: const Text('Save Receipt Image'),
+              subtitle: const Text('Save original image file'),
+              onTap: () async {
                 Navigator.pop(context);
+                if (expense.receiptImage == null || expense.receiptImage!.isEmpty) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No receipt image available to save'),
+                      backgroundColor: AppColors.warning,
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                final savedName = await ExportService.instance.exportReceiptImageCopy(
+                  imagePath: expense.receiptImage!,
+                  merchant: expense.merchant,
+                );
+                if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Image export started for ${expense.merchant}'),
+                    content: Text('Saved $savedName'),
                     backgroundColor: AppColors.success,
                     behavior: SnackBarBehavior.floating,
                   ),

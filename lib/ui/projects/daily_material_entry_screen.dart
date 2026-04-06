@@ -1,4 +1,5 @@
 // lib/ui/projects/daily_material_entry_screen.dart
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -8,29 +9,39 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../service/display_unit_prefs.dart';
+import '../../service/smart_unit_suggestion_service.dart';
+import '../../service/unit_service.dart';
+import '../../widgets/unit_aware_quantity_field.dart';
 
 class MaterialEntry {
   String materialName;
-  int quantity;
+  double quantity;
+  /// [UnitOption.id] from [UnitService.all].
+  String unitId;
   double unitCost;
   String merchant;
-  String? receiptImagePath; // Path to saved receipt image
+  String? receiptImagePath;
   String receiptTag;
   String id;
+  bool isReceiptValid;
 
   MaterialEntry({
     required this.id,
     required this.materialName,
     required this.quantity,
+    required this.unitId,
     required this.unitCost,
     required this.merchant,
     this.receiptImagePath,
     required this.receiptTag,
+    this.isReceiptValid = false,
   });
 
   double get totalCost => quantity * unitCost;
@@ -38,20 +49,24 @@ class MaterialEntry {
 
   MaterialEntry copyWith({
     String? materialName,
-    int? quantity,
+    double? quantity,
+    String? unitId,
     double? unitCost,
     String? merchant,
     String? receiptImagePath,
     String? receiptTag,
+    bool? isReceiptValid,
   }) {
     return MaterialEntry(
       id: id,
       materialName: materialName ?? this.materialName,
       quantity: quantity ?? this.quantity,
+      unitId: unitId ?? this.unitId,
       unitCost: unitCost ?? this.unitCost,
       merchant: merchant ?? this.merchant,
       receiptImagePath: receiptImagePath ?? this.receiptImagePath,
       receiptTag: receiptTag ?? this.receiptTag,
+      isReceiptValid: isReceiptValid ?? this.isReceiptValid,
     );
   }
 }
@@ -75,11 +90,91 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   double _computedTotal = 0.0;
   DateTime _selectedDate = DateTime.now();
   bool _isSubmitting = false;
+  String? _processingEntryId;
+  String _defaultMaterialUnitId = 'u_kg';
+
+  final Map<String, Timer?> _suggestionTimers = {};
+  final Map<String, List<UnitOption>> _suggestionsByEntryId = {};
+
+  final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+
+  // Receipt validation keywords
+  final List<String> _receiptKeywords = [
+    'receipt', 'invoice', 'bill', 'purchase', 'sale', 'payment',
+    'total', 'amount', 'subtotal', 'tax', 'cash', 'change',
+    'thank you', 'store', 'merchant', 'customer', 'order',
+    'transaction', 'card', 'visa', 'mastercard', 'amex',
+    'cashier', 'register', 'terminal', 'authorization'
+  ];
+
+  final List<String> _rejectionKeywords = [
+    'selfie', 'profile', 'avatar', 'photo of me', 'my picture',
+    'screenshot', 'screen capture', 'instagram', 'facebook',
+    'whatsapp', 'snapchat', 'memes', 'funny', 'wallpaper'
+  ];
+
+  final List<RegExp> _receiptDatePatterns = [
+    RegExp(r'date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+    RegExp(r'transaction\s+date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+    RegExp(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
+  ];
+
+  final List<RegExp> _receiptAmountPatterns = [
+    RegExp(r'total:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
+    RegExp(r'amount:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
+    RegExp(r'balance due:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
+  ];
 
   @override
   void initState() {
     super.initState();
-    _addNewEntry(); // Start with one empty entry
+    _loadDefaultMaterialUnit();
+    _addNewEntry();
+  }
+
+  Future<void> _loadDefaultMaterialUnit() async {
+    await SmartUnitSuggestionService.ensureLoaded();
+    final id = await DisplayUnitPrefs.defaultUnitIdForCategory('weight');
+    if (!mounted) return;
+    setState(() {
+      _defaultMaterialUnitId =
+          DisplayUnitPrefs.validatedDefault('weight', id);
+    });
+  }
+
+  void _scheduleMaterialSuggestions(String entryId, String materialName) {
+    _suggestionTimers[entryId]?.cancel();
+    if (materialName.trim().length < 2) {
+      setState(() => _suggestionsByEntryId.remove(entryId));
+      return;
+    }
+    _suggestionTimers[entryId] = Timer(const Duration(milliseconds: 400), () async {
+      final list =
+          await SmartUnitSuggestionService.suggestUnitsForMaterial(materialName);
+      if (!mounted) return;
+      setState(() {
+        _suggestionsByEntryId[entryId] = list;
+      });
+      final ix = _entries.indexWhere((e) => e.id == entryId);
+      if (ix < 0 || !mounted) return;
+      final entry = _entries[ix];
+      if (SmartUnitSuggestionService.keywordMatchForMaterial(materialName) &&
+          list.isNotEmpty) {
+        final ids = list.map((u) => u.id).toSet();
+        if (!ids.contains(entry.unitId)) {
+          _updateEntry(entryId, unitId: list.first.id);
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final t in _suggestionTimers.values) {
+      t?.cancel();
+    }
+    _textRecognizer.close();
+    super.dispose();
   }
 
   void _computeTotal() {
@@ -95,10 +190,12 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           id: DateTime.now().millisecondsSinceEpoch.toString(),
           materialName: '',
           quantity: 0,
+          unitId: _defaultMaterialUnitId,
           unitCost: 0.0,
           merchant: '',
           receiptImagePath: null,
           receiptTag: '',
+          isReceiptValid: false,
         ),
       );
     });
@@ -113,11 +210,13 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
 
   void _updateEntry(String id, {
     String? materialName,
-    int? quantity,
+    double? quantity,
+    String? unitId,
     double? unitCost,
     String? merchant,
     String? receiptImagePath,
     String? receiptTag,
+    bool? isReceiptValid,
   }) {
     setState(() {
       final index = _entries.indexWhere((entry) => entry.id == id);
@@ -126,10 +225,12 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         _entries[index] = entry.copyWith(
           materialName: materialName,
           quantity: quantity,
+          unitId: unitId,
           unitCost: unitCost,
           merchant: merchant,
           receiptImagePath: receiptImagePath,
           receiptTag: receiptTag,
+          isReceiptValid: isReceiptValid,
         );
         _computeTotal();
       }
@@ -221,6 +322,134 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     }
   }
 
+  bool _validateReceipt(String text) {
+    final lowerText = text.toLowerCase();
+
+    // Check for rejection keywords (if any match, reject immediately)
+    for (final keyword in _rejectionKeywords) {
+      if (lowerText.contains(keyword)) {
+        return false;
+      }
+    }
+
+    // Check for receipt keywords (at least 2 should match)
+    int receiptKeywordCount = 0;
+    for (final keyword in _receiptKeywords) {
+      if (lowerText.contains(keyword)) {
+        receiptKeywordCount++;
+      }
+    }
+
+    // Check for date patterns
+    bool hasDate = false;
+    for (final pattern in _receiptDatePatterns) {
+      if (pattern.hasMatch(text)) {
+        hasDate = true;
+        break;
+      }
+    }
+
+    // Check for amount patterns
+    bool hasAmount = false;
+    for (final pattern in _receiptAmountPatterns) {
+      if (pattern.hasMatch(text)) {
+        hasAmount = true;
+        break;
+      }
+    }
+
+    // Check for numbers (receipts have many numbers)
+    final numbers = RegExp(r'\d+').allMatches(text).length;
+    bool hasNumbers = numbers > 5;
+
+    // Check for currency symbols
+    bool hasCurrency = text.contains(RegExp(r'[\$\€\£]'));
+
+    // Check for multiple lines
+    final lines = text.split('\n').where((l) => l.trim().isNotEmpty).length;
+    bool hasMultipleLines = lines > 3;
+
+    // Overall validation: must have at least 3 of these conditions
+    int validConditions = [
+      receiptKeywordCount >= 2,
+      hasDate,
+      hasAmount,
+      hasNumbers,
+      hasCurrency,
+      hasMultipleLines,
+    ].where((v) => v).length;
+
+    return validConditions >= 3;
+  }
+
+  Future<void> _processReceiptImage(File imageFile, String entryId) async {
+    setState(() {
+      _processingEntryId = entryId;
+    });
+
+    try {
+      final inputImage = InputImage.fromFile(imageFile);
+      final recognizedText = await _textRecognizer.processImage(inputImage);
+      final text = recognizedText.text;
+
+      final isValid = _validateReceipt(text);
+
+      if (!mounted) return;
+
+      if (isValid) {
+        // Try to extract merchant name from receipt
+        String? extractedMerchant;
+        final lines = text.split('\n');
+        if (lines.isNotEmpty) {
+          String firstLine = lines.first.trim();
+          if (firstLine.length < 50 && !firstLine.contains(RegExp(r'\d'))) {
+            extractedMerchant = firstLine;
+          }
+        }
+
+        if (extractedMerchant != null && extractedMerchant.isNotEmpty) {
+          _updateEntry(entryId, merchant: extractedMerchant);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Valid receipt detected!'),
+            backgroundColor: AppColors.success,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('This does not appear to be a valid receipt. Please try again.'),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+
+      _updateEntry(entryId, isReceiptValid: isValid);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error processing receipt: $e'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _updateEntry(entryId, isReceiptValid: false);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _processingEntryId = null;
+        });
+      }
+    }
+  }
+
   Future<void> _pickImage(ImageSource source, String entryId) async {
     if (source == ImageSource.camera) {
       await _checkCameraPermission();
@@ -276,11 +505,15 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           entryId,
           receiptImagePath: savedPath,
           receiptTag: 'Receipt ${DateFormat('MMM d').format(DateTime.now())}',
+          isReceiptValid: false, // Will be updated after OCR
         );
+
+        // Process the receipt for validation
+        await _processReceiptImage(file, entryId);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Receipt ${source == ImageSource.camera ? 'captured' : 'selected'} successfully'),
+            content: Text('Receipt ${source == ImageSource.camera ? 'captured' : 'selected'} and processed'),
             backgroundColor: AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
@@ -416,6 +649,20 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
       return;
     }
 
+    // Check if any entry has an invalid receipt
+    final entriesWithInvalidReceipt = validEntries.where((e) => e.hasReceipt && !e.isReceiptValid).toList();
+    if (entriesWithInvalidReceipt.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${entriesWithInvalidReceipt.length} receipt(s) are not valid. Please check or remove them.'),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
@@ -428,6 +675,12 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         final e = validEntries[i];
 
         // Create expense for each material entry
+        final unit = UnitService.byId(e.unitId) ?? UnitService.byId('u_kg')!;
+        final base = UnitService.toBase(
+          quantityOriginal: e.quantity,
+          unit: unit,
+        );
+
         final ok = await db.createExpense(
           id: 'exp_${baseId}_$i',
           projectId: widget.projectId,
@@ -435,9 +688,14 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           amount: e.totalCost,
           date: _selectedDate,
           category: 'Materials',
-          notes: '${e.materialName.trim()} x ${e.quantity}',
+          notes:
+              '${e.materialName.trim()} x ${UnitService.formatQuantity(e.quantity, unit)}',
           receiptImage: e.receiptImagePath,
           status: e.hasReceipt ? 'Verified' : 'Pending',
+          quantityOriginal: e.quantity,
+          unitOriginal: unit.id,
+          quantityBase: base.quantityBase,
+          unitBase: base.unitBase,
         );
 
         if (ok) successCount++;
@@ -642,13 +900,18 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   }
 
   Widget _buildMaterialEntryCard(bool isDark, MaterialEntry entry, CurrencyProvider currency) {
+    final isProcessing = _processingEntryId == entry.id;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          color: entry.hasReceipt
+              ? (entry.isReceiptValid ? AppColors.success : AppColors.warning)
+              : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+          width: entry.hasReceipt ? 2 : 1,
         ),
       ),
       child: Column(
@@ -691,42 +954,74 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
             label: 'Material Name',
             hint: 'e.g. Portland Cement',
             initialValue: entry.materialName,
-            onChanged: (value) => _updateEntry(entry.id, materialName: value),
+            onChanged: (value) {
+              _updateEntry(entry.id, materialName: value);
+              _scheduleMaterialSuggestions(entry.id, value);
+            },
+          ),
+
+          SuggestedUnitChips(
+            isDark: isDark,
+            suggestions: _suggestionsByEntryId[entry.id] ?? const [],
+            selectedUnitId: entry.unitId,
+            onSelect: (u) {
+              _updateEntry(entry.id, unitId: u.id);
+              SmartUnitSuggestionService.recordUnitPreference(
+                entry.materialName,
+                u.name,
+              );
+            },
           ),
 
           const SizedBox(height: 16),
 
-          // Quantity and Unit Cost
+          // Quantity + unit + cost per unit
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
+                flex: 2,
                 child: _buildTextField(
                   isDark: isDark,
                   label: 'Quantity',
                   hint: '0',
-                  initialValue: entry.quantity.toString(),
-                  keyboardType: TextInputType.number,
+                  initialValue: entry.quantity == 0
+                      ? ''
+                      : (entry.quantity == entry.quantity.roundToDouble()
+                          ? entry.quantity.round().toString()
+                          : entry.quantity.toString()),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   onChanged: (value) {
-                    final quantity = int.tryParse(value) ?? 0;
+                    final quantity = double.tryParse(value.trim()) ?? 0.0;
                     _updateEntry(entry.id, quantity: quantity);
                   },
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildTextField(
-                  isDark: isDark,
-                  label: 'Unit Cost (${currency.symbol})',
-                  hint: '0.00',
-                  initialValue: entry.unitCost > 0 ? entry.unitCost.toStringAsFixed(2) : '',
-                  keyboardType: TextInputType.number,
-                  onChanged: (value) {
-                    final cost = double.tryParse(value) ?? 0.0;
-                    _updateEntry(entry.id, unitCost: cost);
-                  },
-                ),
+                flex: 3,
+                child: _buildUnitDropdown(isDark, entry),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Builder(
+            builder: (context) {
+              final u = UnitService.byId(entry.unitId);
+              final unitLabel = u?.displayName ?? 'unit';
+              return _buildTextField(
+                isDark: isDark,
+                label: 'Cost per $unitLabel (${currency.symbol})',
+                hint: '0.00',
+                initialValue:
+                    entry.unitCost > 0 ? entry.unitCost.toStringAsFixed(2) : '',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (value) {
+                  final cost = double.tryParse(value) ?? 0.0;
+                  _updateEntry(entry.id, unitCost: cost);
+                },
+              );
+            },
           ),
 
           const SizedBox(height: 16),
@@ -763,18 +1058,24 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.2),
+                          color: entry.isReceiptValid
+                              ? AppColors.success.withOpacity(0.2)
+                              : AppColors.warning.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.check_circle, color: AppColors.success, size: 12),
+                            Icon(
+                              entry.isReceiptValid ? Icons.check_circle : Icons.warning_amber_rounded,
+                              color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
+                              size: 12,
+                            ),
                             const SizedBox(width: 4),
                             Text(
-                              'Receipt Added',
+                              entry.isReceiptValid ? 'Valid' : 'Invalid',
                               style: TextStyle(
                                 fontSize: 10,
-                                color: AppColors.success,
+                                color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -792,6 +1093,10 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                   height: 60,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
+                      width: 1,
+                    ),
                     image: DecorationImage(
                       image: FileImage(File(entry.receiptImagePath!)),
                       fit: BoxFit.cover,
@@ -809,12 +1114,22 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                           ),
                           child: IconButton(
                             icon: const Icon(Icons.close, color: Colors.white, size: 16),
-                            onPressed: () => _updateEntry(entry.id, receiptImagePath: null),
+                            onPressed: () => _updateEntry(entry.id, receiptImagePath: null, isReceiptValid: false),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(maxWidth: 24, maxHeight: 24),
                           ),
                         ),
                       ),
+                      if (isProcessing)
+                        const Positioned.fill(
+                          child: Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -840,12 +1155,21 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: IconButton(
-                      icon: const Icon(
+                      icon: isProcessing
+                          ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                        ),
+                      )
+                          : const Icon(
                         Icons.camera_alt_rounded,
                         color: Colors.black,
                         size: 24,
                       ),
-                      onPressed: () => _showCameraBottomSheet(context, isDark, entry.id),
+                      onPressed: isProcessing ? null : () => _showCameraBottomSheet(context, isDark, entry.id),
                     ),
                   ),
                 ],
@@ -854,6 +1178,73 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildUnitDropdown(bool isDark, MaterialEntry entry) {
+    final units = UnitService.sortedForDropdown();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(
+            'Unit',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+        ),
+        DropdownButtonFormField<String>(
+          value: entry.unitId,
+          isExpanded: true,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor:
+                isDark ? AppColors.darkBackground : AppColors.lightBackground,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30),
+              borderSide: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              ),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          ),
+          dropdownColor: isDark ? AppColors.darkCard : Colors.white,
+          items: [
+            for (final u in units)
+              DropdownMenuItem(
+                value: u.id,
+                child: Text(
+                  u.displayName,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDark ? AppColors.darkText : AppColors.lightText,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+          ],
+          onChanged: (v) {
+            if (v == null) return;
+            _updateEntry(entry.id, unitId: v);
+            final u = UnitService.byId(v);
+            if (u != null && entry.materialName.trim().isNotEmpty) {
+              SmartUnitSuggestionService.recordUnitPreference(
+                entry.materialName,
+                u.name,
+              );
+            }
+          },
+        ),
+      ],
     );
   }
 
