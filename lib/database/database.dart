@@ -1,4 +1,5 @@
 // lib/database/database.dart
+import 'dart:async';
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
@@ -143,6 +144,49 @@ class ProjectTags extends Table {
   Set<Column> get primaryKey => {projectId, tag};
 }
 
+/// Per-project material stock (quantities stored in category base units).
+@DataClassName('InventoryItemRow')
+class InventoryItems extends Table {
+  TextColumn get id => text().withLength(min: 1, max: 50)();
+  TextColumn get projectId => text().references(Projects, #id)();
+  TextColumn get name => text()();
+  /// Lowercase trimmed name for purchase→stock matching.
+  TextColumn get nameKey => text()();
+  RealColumn get quantityBase => real().withDefault(const Constant(0.0))();
+  TextColumn get unitBase => text()();
+  /// Preferred display unit id (e.g. u_bag).
+  TextColumn get preferredUnitId => text().nullable()();
+  /// Low-stock threshold in [unitBase].
+  RealColumn get reorderLevel => real().withDefault(const Constant(0.0))();
+  TextColumn get notes => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Purchase / usage / adjustment ledger for inventory.
+@DataClassName('MaterialUsageRow')
+class MaterialUsages extends Table {
+  TextColumn get id => text().withLength(min: 1, max: 50)();
+  TextColumn get projectId => text().references(Projects, #id)();
+  TextColumn get inventoryItemId => text().references(InventoryItems, #id)();
+  /// purchase | usage | adjustment
+  TextColumn get kind => text()();
+  RealColumn get quantityBase => real()();
+  TextColumn get unitBase => text()();
+  RealColumn get quantityOriginal => real().nullable()();
+  TextColumn get unitOriginal => text().nullable()();
+  TextColumn get notes => text().nullable()();
+  TextColumn get expenseId => text().nullable()();
+  DateTimeColumn get occurredAt => dateTime()();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ===== DATABASE CLASS =====
 
 @DriftDatabase(
@@ -156,13 +200,15 @@ class ProjectTags extends Table {
     Settings,
     Users,
     ProjectTags,
+    InventoryItems,
+    MaterialUsages,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -449,6 +495,10 @@ class AppDatabase extends _$AppDatabase {
           await m.addColumn(expenses, expenses.quantityBase);
           await m.addColumn(expenses, expenses.unitBase);
         }
+        if (from < 4) {
+          await m.createTable(inventoryItems);
+          await m.createTable(materialUsages);
+        }
       },
     );
   }
@@ -561,6 +611,12 @@ class AppDatabase extends _$AppDatabase {
         expenses,
       )..where((t) => t.projectId.equals(projectId))).go();
       await (delete(tasks)..where((t) => t.projectId.equals(projectId))).go();
+      await (delete(
+        materialUsages,
+      )..where((t) => t.projectId.equals(projectId))).go();
+      await (delete(
+        inventoryItems,
+      )..where((t) => t.projectId.equals(projectId))).go();
       await (delete(
         projectTags,
       )..where((t) => t.projectId.equals(projectId))).go();
@@ -724,6 +780,74 @@ class AppDatabase extends _$AppDatabase {
   Future<int> deleteTask(String id) =>
       (delete(tasks)..where((t) => t.id.equals(id))).go();
 
+  // ===== INVENTORY QUERIES =====
+
+  Stream<List<InventoryItemRow>> watchInventoryForProject(String projectId) {
+    return (select(inventoryItems)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .watch();
+  }
+
+  Future<List<InventoryItemRow>> getInventoryForProject(String projectId) {
+    return (select(inventoryItems)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .get();
+  }
+
+  Future<InventoryItemRow?> getInventoryItem(String id) {
+    return (select(
+      inventoryItems,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
+  }
+
+  Future<InventoryItemRow?> findInventoryByNameKey(
+    String projectId,
+    String nameKey,
+  ) {
+    return (select(inventoryItems)..where(
+          (t) => t.projectId.equals(projectId) & t.nameKey.equals(nameKey),
+        ))
+        .getSingleOrNull();
+  }
+
+  Future<int> insertInventoryItem(InventoryItemsCompanion row) =>
+      into(inventoryItems).insert(row);
+
+  Future<bool> updateInventoryItem(InventoryItemsCompanion row) =>
+      update(inventoryItems).replace(row);
+
+  Future<int> deleteInventoryItem(String id) async {
+    await (delete(
+      materialUsages,
+    )..where((t) => t.inventoryItemId.equals(id))).go();
+    return (delete(inventoryItems)..where((t) => t.id.equals(id))).go();
+  }
+
+  Stream<List<MaterialUsageRow>> watchUsagesForProject(String projectId) {
+    return (select(materialUsages)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([
+            (t) =>
+                OrderingTerm(expression: t.occurredAt, mode: OrderingMode.desc),
+          ]))
+        .watch();
+  }
+
+  Future<List<MaterialUsageRow>> getUsagesForItem(String inventoryItemId) {
+    return (select(materialUsages)
+          ..where((t) => t.inventoryItemId.equals(inventoryItemId))
+          ..orderBy([
+            (t) =>
+                OrderingTerm(expression: t.occurredAt, mode: OrderingMode.desc),
+          ]))
+        .get();
+  }
+
+  Future<int> insertMaterialUsage(MaterialUsagesCompanion row) =>
+      into(materialUsages).insert(row);
+
   // ===== DASHBOARD STATS =====
 
   Future<Map<String, dynamic>> getDashboardStats() async {
@@ -739,7 +863,7 @@ class AppDatabase extends _$AppDatabase {
     );
 
     final pendingTasks =
-        await (select(tasks)..where((t) => t.status.equals('Done').not()))
+        await (select(tasks)..where((t) => t.status.equals('done').not()))
             .get()
             .then((tasks) => tasks.length);
 
@@ -760,15 +884,20 @@ class AppDatabase extends _$AppDatabase {
     final projectCount = projectIds.length;
 
     final totalBudget = projectRows.fold<double>(0.0, (a, p) => a + p.budget);
-    final totalSpent = projectRows.fold<double>(0.0, (a, p) => a + p.spent);
 
+    var totalSpent = 0.0;
     var pendingTasks = 0;
     if (projectIds.isNotEmpty) {
+      final expenseRows = await (select(
+        expenses,
+      )..where((t) => t.projectId.isIn(projectIds))).get();
+      totalSpent = expenseRows.fold<double>(0.0, (a, e) => a + e.amount);
+
       pendingTasks =
           await (select(tasks)..where(
                 (t) =>
                     t.projectId.isIn(projectIds) &
-                    t.status.equals('Done').not(),
+                    t.status.equals('done').not(),
               ))
               .get()
               .then((rows) => rows.length);
@@ -781,6 +910,44 @@ class AppDatabase extends _$AppDatabase {
       'remainingBudget': totalBudget - totalSpent,
       'pendingTasks': pendingTasks,
     };
+  }
+
+  /// Emits whenever projects, tasks, or expenses change for [userId]'s data.
+  /// Uses table watches (not polling) so the dashboard stays fresh without timers.
+  Stream<void> watchDashboardTriggersForUser(String userId) {
+    late StreamController<void> controller;
+    StreamSubscription<List<Project>>? projectSub;
+    StreamSubscription<List<Task>>? taskSub;
+    StreamSubscription<List<Expense>>? expenseSub;
+
+    void ping() {
+      if (!controller.isClosed) {
+        controller.add(null);
+      }
+    }
+
+    controller = StreamController<void>.broadcast(
+      onListen: () {
+        projectSub = watchProjectsForUser(userId).listen((_) => ping());
+        taskSub = select(tasks).watch().listen((_) => ping());
+        expenseSub = select(expenses).watch().listen((_) => ping());
+        ping();
+      },
+      onCancel: () async {
+        await projectSub?.cancel();
+        await taskSub?.cancel();
+        await expenseSub?.cancel();
+      },
+    );
+
+    return controller.stream;
+  }
+
+  Stream<List<Expense>> watchExpensesForProjects(List<String> projectIds) {
+    if (projectIds.isEmpty) {
+      return Stream.value(const <Expense>[]);
+    }
+    return (select(expenses)..where((t) => t.projectId.isIn(projectIds))).watch();
   }
 
   // ===== USER QUERIES =====

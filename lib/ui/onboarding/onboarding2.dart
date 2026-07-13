@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
+import '../../providers/currency_provider.dart';
 
 import '../../providers/theme_provider.dart';
 
@@ -28,6 +29,7 @@ class _OnboardingScreen2State extends State<OnboardingScreen2> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode(context);
     final theme = Theme.of(context);
+    final currency = Provider.of<CurrencyProvider>(context);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -65,7 +67,7 @@ class _OnboardingScreen2State extends State<OnboardingScreen2> {
                     // Illustration Area
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: _buildIllustration(isDark),
+                      child: _buildIllustration(isDark, currency),
                     ),
 
                     const SizedBox(height: 40),
@@ -137,7 +139,7 @@ class _OnboardingScreen2State extends State<OnboardingScreen2> {
     );
   }
 
-  Widget _buildIllustration(bool isDark) {
+  Widget _buildIllustration(bool isDark, CurrencyProvider currency) {
     return Center(
       child: Container(
         width: 320,
@@ -242,7 +244,7 @@ class _OnboardingScreen2State extends State<OnboardingScreen2> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '\$4,290',
+                        currency.format(4290.0),
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,

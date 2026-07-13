@@ -28,6 +28,11 @@ import '../ui/screens/profile.dart';
 import '../ui/screens/reports.dart';
 import '../ui/screens/settings.dart';
 import '../ui/screens/settings_unit_screen.dart';
+import '../ui/tasks/task_detail_screen.dart';
+import '../ui/tasks/task_form_screen.dart';
+import '../ui/tasks/tasks_screen.dart';
+import '../ui/inventory/inventory_screen.dart';
+import '../constants/models/task_model.dart';
 
 class AppRoutes {
   static const String splash = '/';
@@ -62,6 +67,11 @@ class AppRoutes {
       '/project/:projectId/receipt/:receiptId';
   static const String reportsAnalytics = '/reports'; // Add this route
   static const String projectReports = '/project/:id/reports';
+  static const String projectTasks = '/project/:id/tasks';
+  static const String projectTaskCreate = '/project/:id/tasks/new';
+  static const String projectTaskDetail = '/project/:id/tasks/:taskId';
+  static const String projectTaskEdit = '/project/:id/tasks/:taskId/edit';
+  static const String projectInventory = '/project/:id/inventory';
 }
 
 final GoRouter router = GoRouter(
@@ -325,6 +335,81 @@ final GoRouter router = GoRouter(
               ),
             );
           },
+        );
+      },
+    ),
+
+    // Project tasks
+    GoRoute(
+      path: AppRoutes.projectTasks,
+      name: 'project-tasks',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final projectName = state.extra as String? ?? 'Project';
+        return TasksScreen(projectId: id, projectName: projectName);
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectInventory,
+      name: 'project-inventory',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final projectName = state.extra as String? ?? 'Project';
+        return InventoryScreen(projectId: id, projectName: projectName);
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectTaskCreate,
+      name: 'project-task-create',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final projectName = state.extra as String? ?? 'Project';
+        return TaskFormScreen(projectId: id, projectName: projectName);
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectTaskEdit,
+      name: 'project-task-edit',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final taskId = state.pathParameters['taskId'] ?? '';
+        final extra = state.extra;
+        String projectName = 'Project';
+        ProjectTask? task;
+        if (extra is Map) {
+          projectName = extra['projectName'] as String? ?? projectName;
+          task = extra['task'] as ProjectTask?;
+        } else if (extra is String) {
+          projectName = extra;
+        }
+        return TaskFormScreen(
+          projectId: id,
+          projectName: projectName,
+          task: task,
+          taskId: taskId,
+        );
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectTaskDetail,
+      name: 'project-task-detail',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final taskId = state.pathParameters['taskId'] ?? '';
+        final extra = state.extra;
+        String projectName = 'Project';
+        ProjectTask? task;
+        if (extra is Map) {
+          projectName = extra['projectName'] as String? ?? projectName;
+          task = extra['task'] as ProjectTask?;
+        } else if (extra is String) {
+          projectName = extra;
+        }
+        return TaskDetailScreen(
+          projectId: id,
+          projectName: projectName,
+          taskId: taskId,
+          initialTask: task,
         );
       },
     ),

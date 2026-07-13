@@ -1,12 +1,17 @@
 // lib/providers/drift_database_provider.dart
+import 'dart:async';
+
 import 'package:drift/drift.dart' as drift;
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:projectrack1/database/database.dart' as drift_db;
 
 import '../constants/models/expense_model.dart';
 import '../constants/models/projects_model.dart';
+import '../constants/models/task_model.dart';
 import '../service/google_sync_service.dart';
 import '../themes/app_colors.dart';
+import 'dashboard_data.dart';
 
 class DriftDatabaseProvider extends ChangeNotifier {
   late final drift_db.AppDatabase _database;
@@ -18,7 +23,9 @@ class DriftDatabaseProvider extends ChangeNotifier {
 
   // Reactive streams (mapped to your model classes)
   late Stream<List<Project>> _projectsStream;
-  late Stream<Map<String, dynamic>> _dashboardStatsStream;
+  StreamSubscription<void>? _dashboardTriggerSub;
+  final StreamController<DashboardData> _dashboardDataController =
+      StreamController<DashboardData>.broadcast();
 
   // Current selections
   Project? _currentProject;
@@ -33,8 +40,10 @@ class DriftDatabaseProvider extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get error => _error;
   Stream<List<Project>> get projectsStream => _projectsStream;
+  Stream<DashboardData> get dashboardDataStream => _dashboardDataController.stream;
+  /// Prefer [dashboardDataStream]. Kept for callers that only need the stats map.
   Stream<Map<String, dynamic>> get dashboardStatsStream =>
-      _dashboardStatsStream;
+      dashboardDataStream.map((d) => d.toStatsMap());
   Project? get currentProject => _currentProject;
   Expense? get currentExpense => _currentExpense;
   drift_db.Task? get currentTask => _currentTask;
@@ -74,12 +83,14 @@ class DriftDatabaseProvider extends ChangeNotifier {
 
   void _initializeStreams() {
     final uid = _activeUserId;
+    _dashboardTriggerSub?.cancel();
+    _dashboardTriggerSub = null;
+
     if (uid == null) {
       _projectsStream = Stream.value(<Project>[]);
-      _dashboardStatsStream = Stream.periodic(
-        const Duration(seconds: 20),
-        (_) => _emptyDashboardStats(),
-      );
+      if (!_dashboardDataController.isClosed) {
+        _dashboardDataController.add(DashboardData.empty());
+      }
       return;
     }
 
@@ -98,19 +109,139 @@ class DriftDatabaseProvider extends ChangeNotifier {
           .toList();
     });
 
-    _dashboardStatsStream = Stream.periodic(
-      const Duration(seconds: 20),
-      (_) => _database.getDashboardStatsForUser(uid),
-    ).asyncMap((stats) => stats);
+    // Reactive dashboard: recompute when projects, tasks, or expenses change.
+    _dashboardTriggerSub = _database
+        .watchDashboardTriggersForUser(uid)
+        .listen((_) async {
+          try {
+            final data = await buildDashboardData(uid);
+            if (!_dashboardDataController.isClosed) {
+              _dashboardDataController.add(data);
+            }
+          } catch (e) {
+            debugPrint('Dashboard stream error: $e');
+          }
+        });
   }
 
-  Map<String, dynamic> _emptyDashboardStats() => {
-    'projectCount': 0,
-    'totalBudget': 0.0,
-    'totalSpent': 0.0,
-    'remainingBudget': 0.0,
-    'pendingTasks': 0,
-  };
+  /// Builds a full dashboard snapshot (stats + recent projects + spend insights).
+  Future<DashboardData> buildDashboardData(String userId) async {
+    final driftList = await _database.getProjectsForUser(userId);
+    final tagsByProject = await _database.getTagsForProjects(
+      driftList.map((p) => p.id).toList(),
+    );
+    final projects = driftList
+        .map(
+          (project) => Project.fromDrift(
+            project,
+          ).copyWith(tags: tagsByProject[project.id] ?? const []),
+        )
+        .toList();
+
+    final stats = await _database.getDashboardStatsForUser(userId);
+    final projectIds = projects.map((p) => p.id).toList();
+
+    var doneTasks = 0;
+    if (projectIds.isNotEmpty) {
+      final taskRows = await (_database.select(
+        _database.tasks,
+      )..where((t) => t.projectId.isIn(projectIds))).get();
+      doneTasks = taskRows
+          .where((t) => TaskStatus.fromString(t.status) == TaskStatus.done)
+          .length;
+    }
+
+    final insights = await _buildInsightsSeries(projects);
+
+    return DashboardData(
+      projects: projects,
+      projectCount: stats['projectCount'] as int? ?? projects.length,
+      activeProjectCount: projects.where((p) => p.status == 'Active').length,
+      totalBudget: (stats['totalBudget'] as num?)?.toDouble() ?? 0,
+      totalSpent: (stats['totalSpent'] as num?)?.toDouble() ?? 0,
+      remainingBudget: (stats['remainingBudget'] as num?)?.toDouble() ?? 0,
+      pendingTasks: stats['pendingTasks'] as int? ?? 0,
+      doneTasks: doneTasks,
+      insightsSeries: insights,
+    );
+  }
+
+  static const int _insightsDays = 30;
+
+  static DateTime _dateOnly(DateTime dt) =>
+      DateTime(dt.year, dt.month, dt.day);
+
+  Future<List<DashboardInsightSeries>> _buildInsightsSeries(
+    List<Project> projects,
+  ) async {
+    final now = DateTime.now();
+    final start = _dateOnly(
+      now.subtract(const Duration(days: _insightsDays - 1)),
+    );
+
+    if (projects.isEmpty) return const [];
+
+    final perProjectDaily = <String, List<double>>{};
+    final perProjectName = <String, String>{};
+    final perProjectTotal = <String, double>{};
+
+    for (final p in projects) {
+      perProjectName[p.id] = p.name;
+      perProjectDaily[p.id] = List<double>.filled(_insightsDays, 0);
+
+      final expenses = await getExpensesByProject(p.id);
+      for (final e in expenses) {
+        final d = _dateOnly(e.date);
+        final idx = d.difference(start).inDays;
+        if (idx < 0 || idx >= _insightsDays) continue;
+        perProjectDaily[p.id]![idx] += e.amount;
+        perProjectTotal[p.id] = (perProjectTotal[p.id] ?? 0) + e.amount;
+      }
+    }
+
+    final topProjectIds = perProjectTotal.keys.toList()
+      ..sort(
+        (a, b) =>
+            (perProjectTotal[b] ?? 0).compareTo(perProjectTotal[a] ?? 0),
+      );
+
+    final selected = topProjectIds.take(3).toList();
+    if (selected.isEmpty) return const [];
+
+    const palette = <Color>[
+      AppColors.primary,
+      AppColors.success,
+      AppColors.secondary,
+    ];
+
+    final series = <DashboardInsightSeries>[];
+    for (var i = 0; i < selected.length; i++) {
+      final id = selected[i];
+      final daily =
+          perProjectDaily[id] ?? List<double>.filled(_insightsDays, 0);
+
+      double running = 0;
+      final spots = <FlSpot>[];
+      for (var x = 0; x < daily.length; x++) {
+        running += daily[x];
+        spots.add(FlSpot(x.toDouble(), running));
+      }
+
+      series.add(
+        DashboardInsightSeries(
+          projectId: id,
+          projectName: perProjectName[id] ?? 'Project',
+          color: palette[i % palette.length],
+          spots: spots,
+        ),
+      );
+    }
+
+    return series;
+  }
+
+  Map<String, dynamic> _emptyDashboardStats() =>
+      DashboardData.empty().toStatsMap();
 
   // ===== PROJECT METHODS =====
 
@@ -499,6 +630,32 @@ class DriftDatabaseProvider extends ChangeNotifier {
 
   // ===== TASK METHODS =====
 
+  Stream<List<ProjectTask>> watchProjectTasks(String projectId) {
+    return _database.watchTasksByProject(projectId).map(
+      (rows) => rows.map(ProjectTask.fromDrift).toList(),
+    );
+  }
+
+  Future<List<ProjectTask>> getProjectTasks(String projectId) async {
+    try {
+      final rows = await _database.getTasksByProject(projectId);
+      return rows.map(ProjectTask.fromDrift).toList();
+    } catch (e) {
+      _setError('Failed to get tasks: $e');
+      return [];
+    }
+  }
+
+  Future<ProjectTask?> getProjectTask(String id) async {
+    try {
+      final row = await _database.getTask(id);
+      return row == null ? null : ProjectTask.fromDrift(row);
+    } catch (e) {
+      _setError('Failed to load task: $e');
+      return null;
+    }
+  }
+
   Future<bool> createTask({
     required String id,
     required String projectId,
@@ -575,6 +732,9 @@ class DriftDatabaseProvider extends ChangeNotifier {
     String? priority,
     DateTime? dueDate,
     String? assignedTo,
+    bool clearDueDate = false,
+    bool clearAssignedTo = false,
+    bool clearDescription = false,
   }) async {
     _setLoading(true);
     try {
@@ -590,11 +750,17 @@ class DriftDatabaseProvider extends ChangeNotifier {
           id: drift.Value(id),
           projectId: drift.Value(existing.projectId),
           title: drift.Value(title ?? existing.title),
-          description: drift.Value(description ?? existing.description),
+          description: drift.Value(
+            clearDescription ? null : (description ?? existing.description),
+          ),
           status: drift.Value(status ?? existing.status),
           priority: drift.Value(priority ?? existing.priority),
-          dueDate: drift.Value(dueDate ?? existing.dueDate),
-          assignedTo: drift.Value(assignedTo ?? existing.assignedTo),
+          dueDate: drift.Value(
+            clearDueDate ? null : (dueDate ?? existing.dueDate),
+          ),
+          assignedTo: drift.Value(
+            clearAssignedTo ? null : (assignedTo ?? existing.assignedTo),
+          ),
           createdAt: drift.Value(existing.createdAt),
           updatedAt: drift.Value(now),
         ),
@@ -856,6 +1022,8 @@ class DriftDatabaseProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    _dashboardTriggerSub?.cancel();
+    _dashboardDataController.close();
     if (_isInitialized) {
       _database.close();
     }

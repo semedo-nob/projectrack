@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:go_router/go_router.dart';
 import 'package:projectrack1/constants/models/projects_model.dart';
+import 'package:projectrack1/providers/dashboard_data.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
 
@@ -23,15 +24,10 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  List<Project> _projects = [];
-  bool _loadingProjects = true;
-  StreamSubscription<List<Project>>? _projectsSub;
-  int _projectCount = 0;
-  double _totalSpent = 0;
-  int _pendingTasks = 0;
+  StreamSubscription<DashboardData>? _dashboardSub;
+  DashboardData _data = DashboardData.empty();
+  bool _loading = true;
 
-  bool _loadingInsights = true;
-  List<_InsightsSeries> _insightsSeries = const [];
   static const int _insightsDays = 30;
 
   static String _greetingForTime(DateTime now) {
@@ -45,103 +41,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadProjects();
       final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
-      _projectsSub?.cancel();
-      _projectsSub = db.projectsStream.listen((_) => _loadProjects());
+      _dashboardSub?.cancel();
+      _dashboardSub = db.dashboardDataStream.listen(
+        (data) {
+          if (!mounted) return;
+          setState(() {
+            _data = data;
+            _loading = false;
+          });
+        },
+        onError: (e) {
+          debugPrint('Dashboard stream error: $e');
+          if (mounted) setState(() => _loading = false);
+        },
+      );
+      // Seed immediately — broadcast streams can miss the first emit.
+      final uid = db.activeUserId;
+      if (uid != null) {
+        db.buildDashboardData(uid).then((data) {
+          if (!mounted) return;
+          setState(() {
+            _data = data;
+            _loading = false;
+          });
+        });
+      } else {
+        setState(() {
+          _data = DashboardData.empty();
+          _loading = false;
+        });
+      }
     });
   }
 
   @override
   void dispose() {
-    _projectsSub?.cancel();
+    _dashboardSub?.cancel();
     super.dispose();
-  }
-
-  Future<void> _loadProjects() async {
-    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
-    final list = await db.getAllProjects();
-    final stats = await db.getDashboardStats();
-    final insights = await _buildInsightsSeries(db, list);
-    if (!mounted) return;
-    setState(() {
-      _projects = list;
-      _loadingProjects = false;
-      _projectCount = stats['projectCount'] as int? ?? list.length;
-      _totalSpent = (stats['totalSpent'] as num?)?.toDouble() ?? 0;
-      _pendingTasks = stats['pendingTasks'] as int? ?? 0;
-      _insightsSeries = insights;
-      _loadingInsights = false;
-    });
-  }
-
-  static DateTime _dateOnly(DateTime dt) => DateTime(dt.year, dt.month, dt.day);
-
-  Future<List<_InsightsSeries>> _buildInsightsSeries(
-    DriftDatabaseProvider db,
-    List<Project> projects,
-  ) async {
-    final now = DateTime.now();
-    final start = _dateOnly(now.subtract(const Duration(days: _insightsDays - 1)));
-
-    if (projects.isEmpty) return const [];
-
-    // Build daily spend per project for last N days.
-    final perProjectDaily = <String, List<double>>{};
-    final perProjectName = <String, String>{};
-    final perProjectTotal = <String, double>{};
-
-    for (final p in projects) {
-      perProjectName[p.id] = p.name;
-      perProjectDaily[p.id] = List<double>.filled(_insightsDays, 0);
-
-      final expenses = await db.getExpensesByProject(p.id);
-      for (final e in expenses) {
-        final d = _dateOnly(e.date);
-        final idx = d.difference(start).inDays;
-        if (idx < 0 || idx >= _insightsDays) continue;
-        perProjectDaily[p.id]![idx] += e.amount;
-        perProjectTotal[p.id] = (perProjectTotal[p.id] ?? 0) + e.amount;
-      }
-    }
-
-    // Show up to top 3 projects by spend in the window.
-    final topProjectIds = perProjectTotal.keys.toList()
-      ..sort((a, b) => (perProjectTotal[b] ?? 0).compareTo(perProjectTotal[a] ?? 0));
-
-    final selected = topProjectIds.take(3).toList();
-    if (selected.isEmpty) return const [];
-
-    const palette = <Color>[
-      AppColors.primary,
-      AppColors.success,
-      AppColors.secondary,
-    ];
-
-    final series = <_InsightsSeries>[];
-    for (var i = 0; i < selected.length; i++) {
-      final id = selected[i];
-      final daily = perProjectDaily[id] ?? List<double>.filled(_insightsDays, 0);
-
-      // Convert to cumulative spend for a smooth trend line.
-      double running = 0;
-      final spots = <FlSpot>[];
-      for (var x = 0; x < daily.length; x++) {
-        running += daily[x];
-        spots.add(FlSpot(x.toDouble(), running));
-      }
-
-      series.add(
-        _InsightsSeries(
-          projectId: id,
-          projectName: perProjectName[id] ?? 'Project',
-          color: palette[i % palette.length],
-          spots: spots,
-        ),
-      );
-    }
-
-    return series;
   }
 
   @override
@@ -153,11 +90,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final userName = auth.currentUser?.name ?? 'User';
     final greeting = _greetingForTime(DateTime.now());
 
+    final subtitle =
+        '${_data.activeProjectCount} active projects · ${_data.pendingTasks} open tasks';
+    final recentProjects = _data.recentProjects;
+    final insightsSeries = _data.insightsSeries;
+
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
-          // Top App Bar
+          // 1. Dashboard Header: Top Bar matching redesigned specs
           SliverAppBar(
             expandedHeight: 0,
             floating: true,
@@ -174,25 +116,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             title: Text(
               'ProjectRack',
               style: theme.appBarTheme.titleTextStyle?.copyWith(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: isDark ? AppColors.darkText : AppColors.lightText,
               ),
             ),
-            centerTitle: false,
+            centerTitle: true,
             actions: [
-              Container(
-                margin: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isDark
-                      ? Colors.white.withOpacity(0.1)
-                      : Colors.black.withOpacity(0.05),
-                ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8.0),
                 child: IconButton(
                   icon: Icon(
-                    Icons.notifications_rounded,
-                    color: theme.appBarTheme.foregroundColor,
-                    size: 28,
+                    Icons.notifications_outlined,
+                    color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    size: 24,
                   ),
                   onPressed: () => context.go(AppRoutes.notifications),
                 ),
@@ -200,161 +137,151 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
 
-          // Greeting — one scannable line
+          // 2. Greeting Section
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
             sliver: SliverToBoxAdapter(
-              child: Text(
-                '$greeting, $userName',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? AppColors.darkText : AppColors.lightText,
-                ),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            sliver: SliverToBoxAdapter(
-              child: Text(
-                'Your projects and spending at a glance',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                ),
-              ),
-            ),
-          ),
-
-          // Single summary card: projects · spent · tasks
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            sliver: SliverToBoxAdapter(
-              child: Consumer<CurrencyProvider>(
-                builder: (_, currency, _) => Material(
-                  color: isDark ? AppColors.darkCard : Colors.white,
-                  elevation: 0,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.06)
-                            : AppColors.lightBorder,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => context.go(AppRoutes.projects),
-                            borderRadius: const BorderRadius.horizontal(
-                              left: Radius.circular(16),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              child: _buildMetricCell(
-                                isDark: isDark,
-                                label: 'Projects',
-                                value: '$_projectCount',
-                              ),
-                            ),
-                          ),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 52,
-                          color: (isDark ? Colors.white : Colors.black)
-                              .withOpacity(0.08),
-                        ),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => context.go(AppRoutes.reportsAnalytics),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              child: _buildMetricCell(
-                                isDark: isDark,
-                                label: 'Spent',
-                                value: currency.format(_totalSpent),
-                                valueFontSize: 15,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 52,
-                          color: (isDark ? Colors.white : Colors.black)
-                              .withOpacity(0.08),
-                        ),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => context.go(AppRoutes.projects),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              child: _buildMetricCell(
-                                isDark: isDark,
-                                label: 'Tasks',
-                                value: '$_pendingTasks',
-                                subtitle: 'open',
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // Reports Summary Card
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            sliver: SliverToBoxAdapter(
-              child: Consumer<CurrencyProvider>(
-                builder: (_, currency, _) => GestureDetector(
-                  onTap: () => context.go(AppRoutes.reportsAnalytics),
-                  child: _buildInsightsCard(isDark: isDark, currency: currency),
-                ),
-              ),
-            ),
-          ),
-
-          // Section Header
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            sliver: SliverToBoxAdapter(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Your Projects',
+                    '$greeting, $userName',
                     style: TextStyle(
                       fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w500,
                       color: isDark ? AppColors.darkText : AppColors.lightText,
+                      height: 1.3,
                     ),
                   ),
-                  TextButton(
-                    onPressed: () => context.go(AppRoutes.projects),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.primary,
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                     ),
-                    child: const Text('See All'),
                   ),
                 ],
               ),
             ),
           ),
 
-          // Projects List (from database; tap -> project details)
+          // 3. Stats Row: Three individual horizontal cards
           SliverPadding(
-            padding: const EdgeInsets.all(16),
-            sliver: _loadingProjects
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: Consumer<CurrencyProvider>(
+                builder: (_, currency, _) => Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatCard(
+                        isDark: isDark,
+                        label: 'Projects',
+                        value: '${_data.projectCount}',
+                        onTap: () => context.go(AppRoutes.projects),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildStatCard(
+                        isDark: isDark,
+                        label: 'Spent',
+                        value: currency.format(_data.totalSpent),
+                        valueFontSize: 15,
+                        onTap: () => context.go(AppRoutes.reportsAnalytics),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // 4. Spending Trend Section Header
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Spending trend',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => context.go(AppRoutes.reportsAnalytics),
+                    child: Text(
+                      'Reports →',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? AppColors.primaryLight : AppColors.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 4. Spending Trend Card (Sparkline chart, cumulated spending, and legend)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverToBoxAdapter(
+              child: Consumer<CurrencyProvider>(
+                builder: (_, currency, _) => GestureDetector(
+                  onTap: () => context.go(AppRoutes.reportsAnalytics),
+                  child: _buildInsightsCard(
+                    isDark: isDark,
+                    currency: currency,
+                    insightsSeries: insightsSeries,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // 5. Projects Section Header
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 10),
+            sliver: SliverToBoxAdapter(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Recent projects',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => context.go(AppRoutes.projects),
+                    child: Text(
+                      'See all →',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? AppColors.primaryLight : AppColors.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 5. Projects List (Compact rows, no network images, offline friendly)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: _loading
                 ? const SliverToBoxAdapter(
                     child: Center(
                       child: Padding(
@@ -363,7 +290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ),
                   )
-                : _projects.isEmpty
+                : recentProjects.isEmpty
                     ? SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 32),
@@ -409,70 +336,93 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     : SliverList(
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
-                            if (index.isOdd) return const SizedBox(height: 16);
-                            final project = _projects[index ~/ 2];
+                            if (index.isOdd) return const SizedBox(height: 8);
+                            final project = recentProjects[index ~/ 2];
                             final currency = Provider.of<CurrencyProvider>(context);
-                            return _buildProjectCard(
+                            return _buildProjectRow(
                               isDark: isDark,
                               project: project,
                               currency: currency,
                             );
                           },
-                          childCount: _projects.isEmpty ? 0 : _projects.length * 2 - 1,
+                          childCount: recentProjects.isEmpty ? 0 : recentProjects.length * 2 - 1,
                         ),
                       ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+
+          // 6. Leave bottom padding (80-100px) for bottom nav bar
+          const SliverToBoxAdapter(
+            child: SizedBox(height: 90),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildMetricCell({
+  Widget _buildStatCard({
     required bool isDark,
     required String label,
     required String value,
     String? subtitle,
-    double valueFontSize = 17,
+    double valueFontSize = 18,
+    required VoidCallback onTap,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(
-            fontSize: 10,
-            letterSpacing: 0.5,
-            fontWeight: FontWeight.w600,
-            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: valueFontSize,
-            fontWeight: FontWeight.bold,
-            color: isDark ? AppColors.darkText : AppColors.lightText,
-          ),
-        ),
-        if (subtitle != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark
-                    ? AppColors.darkTextSecondary
-                    : AppColors.lightTextSecondary,
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withOpacity(0.06)
+                  : AppColors.lightBorder,
+              width: 0.5,
             ),
           ),
-      ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 0.4,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: valueFontSize,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? AppColors.darkText : AppColors.lightText,
+                ),
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                  ),
+                ),
+              ] else
+                const SizedBox(height: 13), // Preserve spacing consistency
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -480,14 +430,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final imageProvider = avatarImageProvider(avatarUrl);
     final hasImage = imageProvider != null;
     return Container(
-      width: 40,
-      height: 40,
+      width: 34,
+      height: 34,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: hasImage ? null : AppColors.primary.withOpacity(0.2),
+        color: hasImage ? null : AppColors.info.withOpacity(0.2),
         border: Border.all(
-          color: AppColors.primary,
-          width: 2,
+          color: AppColors.info,
+          width: 1.5,
         ),
         image: hasImage
             ? DecorationImage(
@@ -500,8 +450,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ? null
           : Icon(
               Icons.person_rounded,
-              color: AppColors.primary,
-              size: 24,
+              color: AppColors.info,
+              size: 20,
             ),
     );
   }
@@ -509,23 +459,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Color _statusColor(String status) {
     switch (status) {
       case 'Active':
-        return AppColors.primary;
+        return AppColors.info;
       case 'Done':
         return AppColors.success;
       case 'On Hold':
         return AppColors.warning;
       default:
-        return AppColors.primaryMuted;
+        return AppColors.primary;
     }
   }
 
-  Widget _buildProjectCard({
+  Widget _buildProjectRow({
     required bool isDark,
     required Project project,
     required CurrencyProvider currency,
   }) {
     final statusColor = _statusColor(project.status);
-    final progressColor = project.status == 'Done' ? AppColors.success : null;
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -537,175 +487,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         borderRadius: BorderRadius.circular(16),
         child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkCard : Colors.white,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withOpacity(0.06)
+                  : AppColors.lightBorder,
+              width: 0.5,
+            ),
             boxShadow: [
               BoxShadow(
                 color: isDark ? AppColors.salamonoShadowDark : AppColors.salamonoShadow,
-                blurRadius: 20,
-                offset: const Offset(0, 4),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Thumbnail (no network placeholder — avoids offline SocketException)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: SizedBox(
-                        width: 96,
-                        height: 96,
-                        child: ColoredBox(
-                          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                          child: project.imageUrl.isNotEmpty
-                              ? Image.network(
-                                  project.imageUrl,
-                                  fit: BoxFit.cover,
-                                  width: 96,
-                                  height: 96,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Center(
-                                      child: Icon(
-                                        Icons.folder_rounded,
-                                        size: 40,
-                                        color: isDark ? AppColors.darkTextTertiary : Colors.grey.shade400,
-                                      ),
-                                    );
-                                  },
-                                )
-                              : Center(
-                                  child: Icon(
-                                    Icons.folder_rounded,
-                                    size: 40,
-                                    color: isDark ? AppColors.darkTextTertiary : Colors.grey.shade400,
-                                  ),
-                                ),
-                        ),
+              // Top portion: Name + Status Badge
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      project.name,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? AppColors.darkText : AppColors.lightText,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      project.status,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: statusColor,
                       ),
                     ),
-                    const SizedBox(width: 16),
-
-                    // Content
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  project.name,
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: isDark ? AppColors.darkText : AppColors.lightText,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: statusColor.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Text(
-                                  project.status,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: statusColor,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Expenses'.toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? AppColors.darkText : AppColors.lightText,
-                              ),
-                              children: [
-                                TextSpan(text: currency.format(project.spent)),
-                                TextSpan(
-                                  text: ' / ${currency.format(project.budget)}',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.normal,
-                                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-
-              // Progress Bar
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Progress',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                          ),
+              const SizedBox(height: 10),
+              // Bottom portion: Progress Bar + Percentage + Budget Spent
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: SizedBox(
+                        height: 4,
+                        child: LinearProgressIndicator(
+                          value: project.progress.clamp(0.0, 1.0),
+                          backgroundColor: isDark
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder,
+                          valueColor: AlwaysStoppedAnimation<Color>(statusColor),
                         ),
-                        Text(
-                          '${(project.progress * 100).toInt()}%',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: progressColor ?? AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(20),
-                      child: LinearProgressIndicator(
-                        value: project.progress.clamp(0.0, 1.0),
-                        backgroundColor: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          progressColor ?? AppColors.primary,
-                        ),
-                        minHeight: 8,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    '${(project.progress * 100).toInt()}%',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    '${currency.format(project.spent)} / ${currency.format(project.budget)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -717,81 +591,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildInsightsCard({
     required bool isDark,
     required CurrencyProvider currency,
+    required List<DashboardInsightSeries> insightsSeries,
   }) {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? AppColors.salamonoShadowDark : AppColors.salamonoShadow,
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withOpacity(0.06)
+              : AppColors.lightBorder,
+          width: 0.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppColors.secondary.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.analytics_rounded,
-                      color: isDark ? AppColors.primaryLight : AppColors.primary,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Spending trend',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? AppColors.darkText : AppColors.lightText,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Last $_insightsDays days · ${currency.symbol} · tap for reports',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_loadingInsights)
+          if (_loading)
             const SizedBox(
-              height: 110,
+              height: 88,
               child: Center(child: CircularProgressIndicator()),
             )
-          else if (_insightsSeries.isEmpty)
+          else if (insightsSeries.isEmpty)
             SizedBox(
-              height: 110,
+              height: 88,
               child: Center(
                 child: Text(
                   'No recent expense data yet',
@@ -805,21 +631,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
             SizedBox(
               height: 88,
               child: LineChart(
-                _buildLineChartData(isDark),
+                _buildLineChartData(isDark, insightsSeries),
                 duration: Duration.zero,
               ),
             ),
-          if (!_loadingInsights && _insightsSeries.isNotEmpty) ...[
-            const SizedBox(height: 12),
+          if (!_loading && insightsSeries.isNotEmpty) ...[
+            const SizedBox(height: 10),
             Wrap(
-              spacing: 10,
+              spacing: 12,
               runSpacing: 6,
-              children: _insightsSeries
+              children: insightsSeries
                   .map(
-                    (s) => _LegendChip(
-                      label: s.projectName,
-                      color: s.color,
-                      isDark: isDark,
+                    (s) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: s.color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          s.projectName,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                          ),
+                        ),
+                      ],
                     ),
                   )
                   .toList(),
@@ -830,9 +672,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  LineChartData _buildLineChartData(bool isDark) {
+  LineChartData _buildLineChartData(
+    bool isDark,
+    List<DashboardInsightSeries> insightsSeries,
+  ) {
     double maxY = 0;
-    for (final s in _insightsSeries) {
+    for (final s in insightsSeries) {
       for (final spot in s.spots) {
         if (spot.y > maxY) maxY = spot.y;
       }
@@ -858,132 +703,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
         leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
         rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-        bottomTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            reservedSize: 18,
-            interval: 7,
-            getTitlesWidget: (value, meta) {
-              final v = value.toInt();
-              if (v % 7 != 0) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '${_insightsDays - 1 - v}d',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
+        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       lineTouchData: LineTouchData(
         enabled: true,
-        handleBuiltInTouches: true,
         touchTooltipData: LineTouchTooltipData(
-          getTooltipColor: (_) => isDark ? AppColors.darkSurface : Colors.white,
-          tooltipBorder: BorderSide(
-            color: (isDark ? Colors.white : Colors.black).withOpacity(0.08),
-          ),
           getTooltipItems: (touchedSpots) {
             return touchedSpots.map((spot) {
-              final series = _insightsSeries[spot.barIndex];
+              if (spot.barIndex < 0 || spot.barIndex >= insightsSeries.length) {
+                return null;
+              }
+              final series = insightsSeries[spot.barIndex];
               return LineTooltipItem(
                 '${series.projectName}\n${spot.y.toStringAsFixed(0)}',
                 TextStyle(
-                  color: isDark ? Colors.white : Colors.black,
+                  color: series.color,
                   fontWeight: FontWeight.w600,
-                  fontSize: 12,
+                  fontSize: 11,
                 ),
               );
             }).toList();
           },
         ),
       ),
-      lineBarsData: _insightsSeries
+      lineBarsData: insightsSeries
           .map(
             (s) => LineChartBarData(
               spots: s.spots,
               isCurved: true,
-              barWidth: 2.5,
               color: s.color,
+              barWidth: 2.5,
+              isStrokeCapRound: true,
               dotData: const FlDotData(show: false),
               belowBarData: BarAreaData(
                 show: true,
-                color: s.color.withOpacity(0.10),
+                color: s.color.withOpacity(0.08),
               ),
             ),
           )
           .toList(),
-    );
-  }
-}
-
-class _InsightsSeries {
-  final String projectId;
-  final String projectName;
-  final Color color;
-  final List<FlSpot> spots;
-
-  const _InsightsSeries({
-    required this.projectId,
-    required this.projectName,
-    required this.color,
-    required this.spots,
-  });
-}
-
-class _LegendChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  final bool isDark;
-
-  const _LegendChip({
-    required this.label,
-    required this.color,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 160),
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

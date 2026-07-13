@@ -4560,6 +4560,1428 @@ class ProjectTagsCompanion extends UpdateCompanion<ProjectTag> {
   }
 }
 
+class $InventoryItemsTable extends InventoryItems
+    with TableInfo<$InventoryItemsTable, InventoryItemRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $InventoryItemsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 50,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES projects (id)',
+    ),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameKeyMeta = const VerificationMeta(
+    'nameKey',
+  );
+  @override
+  late final GeneratedColumn<String> nameKey = GeneratedColumn<String>(
+    'name_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _quantityBaseMeta = const VerificationMeta(
+    'quantityBase',
+  );
+  @override
+  late final GeneratedColumn<double> quantityBase = GeneratedColumn<double>(
+    'quantity_base',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.0),
+  );
+  static const VerificationMeta _unitBaseMeta = const VerificationMeta(
+    'unitBase',
+  );
+  @override
+  late final GeneratedColumn<String> unitBase = GeneratedColumn<String>(
+    'unit_base',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _preferredUnitIdMeta = const VerificationMeta(
+    'preferredUnitId',
+  );
+  @override
+  late final GeneratedColumn<String> preferredUnitId = GeneratedColumn<String>(
+    'preferred_unit_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _reorderLevelMeta = const VerificationMeta(
+    'reorderLevel',
+  );
+  @override
+  late final GeneratedColumn<double> reorderLevel = GeneratedColumn<double>(
+    'reorder_level',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0.0),
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    projectId,
+    name,
+    nameKey,
+    quantityBase,
+    unitBase,
+    preferredUnitId,
+    reorderLevel,
+    notes,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'inventory_items';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<InventoryItemRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('name_key')) {
+      context.handle(
+        _nameKeyMeta,
+        nameKey.isAcceptableOrUnknown(data['name_key']!, _nameKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameKeyMeta);
+    }
+    if (data.containsKey('quantity_base')) {
+      context.handle(
+        _quantityBaseMeta,
+        quantityBase.isAcceptableOrUnknown(
+          data['quantity_base']!,
+          _quantityBaseMeta,
+        ),
+      );
+    }
+    if (data.containsKey('unit_base')) {
+      context.handle(
+        _unitBaseMeta,
+        unitBase.isAcceptableOrUnknown(data['unit_base']!, _unitBaseMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitBaseMeta);
+    }
+    if (data.containsKey('preferred_unit_id')) {
+      context.handle(
+        _preferredUnitIdMeta,
+        preferredUnitId.isAcceptableOrUnknown(
+          data['preferred_unit_id']!,
+          _preferredUnitIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('reorder_level')) {
+      context.handle(
+        _reorderLevelMeta,
+        reorderLevel.isAcceptableOrUnknown(
+          data['reorder_level']!,
+          _reorderLevelMeta,
+        ),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  InventoryItemRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return InventoryItemRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      nameKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name_key'],
+      )!,
+      quantityBase: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity_base'],
+      )!,
+      unitBase: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit_base'],
+      )!,
+      preferredUnitId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}preferred_unit_id'],
+      ),
+      reorderLevel: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}reorder_level'],
+      )!,
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $InventoryItemsTable createAlias(String alias) {
+    return $InventoryItemsTable(attachedDatabase, alias);
+  }
+}
+
+class InventoryItemRow extends DataClass
+    implements Insertable<InventoryItemRow> {
+  final String id;
+  final String projectId;
+  final String name;
+
+  /// Lowercase trimmed name for purchase→stock matching.
+  final String nameKey;
+  final double quantityBase;
+  final String unitBase;
+
+  /// Preferred display unit id (e.g. u_bag).
+  final String? preferredUnitId;
+
+  /// Low-stock threshold in [unitBase].
+  final double reorderLevel;
+  final String? notes;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const InventoryItemRow({
+    required this.id,
+    required this.projectId,
+    required this.name,
+    required this.nameKey,
+    required this.quantityBase,
+    required this.unitBase,
+    this.preferredUnitId,
+    required this.reorderLevel,
+    this.notes,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['project_id'] = Variable<String>(projectId);
+    map['name'] = Variable<String>(name);
+    map['name_key'] = Variable<String>(nameKey);
+    map['quantity_base'] = Variable<double>(quantityBase);
+    map['unit_base'] = Variable<String>(unitBase);
+    if (!nullToAbsent || preferredUnitId != null) {
+      map['preferred_unit_id'] = Variable<String>(preferredUnitId);
+    }
+    map['reorder_level'] = Variable<double>(reorderLevel);
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  InventoryItemsCompanion toCompanion(bool nullToAbsent) {
+    return InventoryItemsCompanion(
+      id: Value(id),
+      projectId: Value(projectId),
+      name: Value(name),
+      nameKey: Value(nameKey),
+      quantityBase: Value(quantityBase),
+      unitBase: Value(unitBase),
+      preferredUnitId: preferredUnitId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(preferredUnitId),
+      reorderLevel: Value(reorderLevel),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory InventoryItemRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return InventoryItemRow(
+      id: serializer.fromJson<String>(json['id']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      name: serializer.fromJson<String>(json['name']),
+      nameKey: serializer.fromJson<String>(json['nameKey']),
+      quantityBase: serializer.fromJson<double>(json['quantityBase']),
+      unitBase: serializer.fromJson<String>(json['unitBase']),
+      preferredUnitId: serializer.fromJson<String?>(json['preferredUnitId']),
+      reorderLevel: serializer.fromJson<double>(json['reorderLevel']),
+      notes: serializer.fromJson<String?>(json['notes']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'projectId': serializer.toJson<String>(projectId),
+      'name': serializer.toJson<String>(name),
+      'nameKey': serializer.toJson<String>(nameKey),
+      'quantityBase': serializer.toJson<double>(quantityBase),
+      'unitBase': serializer.toJson<String>(unitBase),
+      'preferredUnitId': serializer.toJson<String?>(preferredUnitId),
+      'reorderLevel': serializer.toJson<double>(reorderLevel),
+      'notes': serializer.toJson<String?>(notes),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  InventoryItemRow copyWith({
+    String? id,
+    String? projectId,
+    String? name,
+    String? nameKey,
+    double? quantityBase,
+    String? unitBase,
+    Value<String?> preferredUnitId = const Value.absent(),
+    double? reorderLevel,
+    Value<String?> notes = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => InventoryItemRow(
+    id: id ?? this.id,
+    projectId: projectId ?? this.projectId,
+    name: name ?? this.name,
+    nameKey: nameKey ?? this.nameKey,
+    quantityBase: quantityBase ?? this.quantityBase,
+    unitBase: unitBase ?? this.unitBase,
+    preferredUnitId: preferredUnitId.present
+        ? preferredUnitId.value
+        : this.preferredUnitId,
+    reorderLevel: reorderLevel ?? this.reorderLevel,
+    notes: notes.present ? notes.value : this.notes,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  InventoryItemRow copyWithCompanion(InventoryItemsCompanion data) {
+    return InventoryItemRow(
+      id: data.id.present ? data.id.value : this.id,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      name: data.name.present ? data.name.value : this.name,
+      nameKey: data.nameKey.present ? data.nameKey.value : this.nameKey,
+      quantityBase: data.quantityBase.present
+          ? data.quantityBase.value
+          : this.quantityBase,
+      unitBase: data.unitBase.present ? data.unitBase.value : this.unitBase,
+      preferredUnitId: data.preferredUnitId.present
+          ? data.preferredUnitId.value
+          : this.preferredUnitId,
+      reorderLevel: data.reorderLevel.present
+          ? data.reorderLevel.value
+          : this.reorderLevel,
+      notes: data.notes.present ? data.notes.value : this.notes,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InventoryItemRow(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('name: $name, ')
+          ..write('nameKey: $nameKey, ')
+          ..write('quantityBase: $quantityBase, ')
+          ..write('unitBase: $unitBase, ')
+          ..write('preferredUnitId: $preferredUnitId, ')
+          ..write('reorderLevel: $reorderLevel, ')
+          ..write('notes: $notes, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    projectId,
+    name,
+    nameKey,
+    quantityBase,
+    unitBase,
+    preferredUnitId,
+    reorderLevel,
+    notes,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is InventoryItemRow &&
+          other.id == this.id &&
+          other.projectId == this.projectId &&
+          other.name == this.name &&
+          other.nameKey == this.nameKey &&
+          other.quantityBase == this.quantityBase &&
+          other.unitBase == this.unitBase &&
+          other.preferredUnitId == this.preferredUnitId &&
+          other.reorderLevel == this.reorderLevel &&
+          other.notes == this.notes &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class InventoryItemsCompanion extends UpdateCompanion<InventoryItemRow> {
+  final Value<String> id;
+  final Value<String> projectId;
+  final Value<String> name;
+  final Value<String> nameKey;
+  final Value<double> quantityBase;
+  final Value<String> unitBase;
+  final Value<String?> preferredUnitId;
+  final Value<double> reorderLevel;
+  final Value<String?> notes;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const InventoryItemsCompanion({
+    this.id = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.nameKey = const Value.absent(),
+    this.quantityBase = const Value.absent(),
+    this.unitBase = const Value.absent(),
+    this.preferredUnitId = const Value.absent(),
+    this.reorderLevel = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  InventoryItemsCompanion.insert({
+    required String id,
+    required String projectId,
+    required String name,
+    required String nameKey,
+    this.quantityBase = const Value.absent(),
+    required String unitBase,
+    this.preferredUnitId = const Value.absent(),
+    this.reorderLevel = const Value.absent(),
+    this.notes = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       projectId = Value(projectId),
+       name = Value(name),
+       nameKey = Value(nameKey),
+       unitBase = Value(unitBase),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<InventoryItemRow> custom({
+    Expression<String>? id,
+    Expression<String>? projectId,
+    Expression<String>? name,
+    Expression<String>? nameKey,
+    Expression<double>? quantityBase,
+    Expression<String>? unitBase,
+    Expression<String>? preferredUnitId,
+    Expression<double>? reorderLevel,
+    Expression<String>? notes,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (projectId != null) 'project_id': projectId,
+      if (name != null) 'name': name,
+      if (nameKey != null) 'name_key': nameKey,
+      if (quantityBase != null) 'quantity_base': quantityBase,
+      if (unitBase != null) 'unit_base': unitBase,
+      if (preferredUnitId != null) 'preferred_unit_id': preferredUnitId,
+      if (reorderLevel != null) 'reorder_level': reorderLevel,
+      if (notes != null) 'notes': notes,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  InventoryItemsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? projectId,
+    Value<String>? name,
+    Value<String>? nameKey,
+    Value<double>? quantityBase,
+    Value<String>? unitBase,
+    Value<String?>? preferredUnitId,
+    Value<double>? reorderLevel,
+    Value<String?>? notes,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return InventoryItemsCompanion(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      name: name ?? this.name,
+      nameKey: nameKey ?? this.nameKey,
+      quantityBase: quantityBase ?? this.quantityBase,
+      unitBase: unitBase ?? this.unitBase,
+      preferredUnitId: preferredUnitId ?? this.preferredUnitId,
+      reorderLevel: reorderLevel ?? this.reorderLevel,
+      notes: notes ?? this.notes,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (nameKey.present) {
+      map['name_key'] = Variable<String>(nameKey.value);
+    }
+    if (quantityBase.present) {
+      map['quantity_base'] = Variable<double>(quantityBase.value);
+    }
+    if (unitBase.present) {
+      map['unit_base'] = Variable<String>(unitBase.value);
+    }
+    if (preferredUnitId.present) {
+      map['preferred_unit_id'] = Variable<String>(preferredUnitId.value);
+    }
+    if (reorderLevel.present) {
+      map['reorder_level'] = Variable<double>(reorderLevel.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('InventoryItemsCompanion(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('name: $name, ')
+          ..write('nameKey: $nameKey, ')
+          ..write('quantityBase: $quantityBase, ')
+          ..write('unitBase: $unitBase, ')
+          ..write('preferredUnitId: $preferredUnitId, ')
+          ..write('reorderLevel: $reorderLevel, ')
+          ..write('notes: $notes, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $MaterialUsagesTable extends MaterialUsages
+    with TableInfo<$MaterialUsagesTable, MaterialUsageRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MaterialUsagesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 50,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES projects (id)',
+    ),
+  );
+  static const VerificationMeta _inventoryItemIdMeta = const VerificationMeta(
+    'inventoryItemId',
+  );
+  @override
+  late final GeneratedColumn<String> inventoryItemId = GeneratedColumn<String>(
+    'inventory_item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES inventory_items (id)',
+    ),
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _quantityBaseMeta = const VerificationMeta(
+    'quantityBase',
+  );
+  @override
+  late final GeneratedColumn<double> quantityBase = GeneratedColumn<double>(
+    'quantity_base',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _unitBaseMeta = const VerificationMeta(
+    'unitBase',
+  );
+  @override
+  late final GeneratedColumn<String> unitBase = GeneratedColumn<String>(
+    'unit_base',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _quantityOriginalMeta = const VerificationMeta(
+    'quantityOriginal',
+  );
+  @override
+  late final GeneratedColumn<double> quantityOriginal = GeneratedColumn<double>(
+    'quantity_original',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _unitOriginalMeta = const VerificationMeta(
+    'unitOriginal',
+  );
+  @override
+  late final GeneratedColumn<String> unitOriginal = GeneratedColumn<String>(
+    'unit_original',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _expenseIdMeta = const VerificationMeta(
+    'expenseId',
+  );
+  @override
+  late final GeneratedColumn<String> expenseId = GeneratedColumn<String>(
+    'expense_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _occurredAtMeta = const VerificationMeta(
+    'occurredAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> occurredAt = GeneratedColumn<DateTime>(
+    'occurred_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    projectId,
+    inventoryItemId,
+    kind,
+    quantityBase,
+    unitBase,
+    quantityOriginal,
+    unitOriginal,
+    notes,
+    expenseId,
+    occurredAt,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'material_usages';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MaterialUsageRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('inventory_item_id')) {
+      context.handle(
+        _inventoryItemIdMeta,
+        inventoryItemId.isAcceptableOrUnknown(
+          data['inventory_item_id']!,
+          _inventoryItemIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_inventoryItemIdMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('quantity_base')) {
+      context.handle(
+        _quantityBaseMeta,
+        quantityBase.isAcceptableOrUnknown(
+          data['quantity_base']!,
+          _quantityBaseMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_quantityBaseMeta);
+    }
+    if (data.containsKey('unit_base')) {
+      context.handle(
+        _unitBaseMeta,
+        unitBase.isAcceptableOrUnknown(data['unit_base']!, _unitBaseMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_unitBaseMeta);
+    }
+    if (data.containsKey('quantity_original')) {
+      context.handle(
+        _quantityOriginalMeta,
+        quantityOriginal.isAcceptableOrUnknown(
+          data['quantity_original']!,
+          _quantityOriginalMeta,
+        ),
+      );
+    }
+    if (data.containsKey('unit_original')) {
+      context.handle(
+        _unitOriginalMeta,
+        unitOriginal.isAcceptableOrUnknown(
+          data['unit_original']!,
+          _unitOriginalMeta,
+        ),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    if (data.containsKey('expense_id')) {
+      context.handle(
+        _expenseIdMeta,
+        expenseId.isAcceptableOrUnknown(data['expense_id']!, _expenseIdMeta),
+      );
+    }
+    if (data.containsKey('occurred_at')) {
+      context.handle(
+        _occurredAtMeta,
+        occurredAt.isAcceptableOrUnknown(data['occurred_at']!, _occurredAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_occurredAtMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MaterialUsageRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MaterialUsageRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      inventoryItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}inventory_item_id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      quantityBase: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity_base'],
+      )!,
+      unitBase: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit_base'],
+      )!,
+      quantityOriginal: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}quantity_original'],
+      ),
+      unitOriginal: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}unit_original'],
+      ),
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+      expenseId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}expense_id'],
+      ),
+      occurredAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}occurred_at'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MaterialUsagesTable createAlias(String alias) {
+    return $MaterialUsagesTable(attachedDatabase, alias);
+  }
+}
+
+class MaterialUsageRow extends DataClass
+    implements Insertable<MaterialUsageRow> {
+  final String id;
+  final String projectId;
+  final String inventoryItemId;
+
+  /// purchase | usage | adjustment
+  final String kind;
+  final double quantityBase;
+  final String unitBase;
+  final double? quantityOriginal;
+  final String? unitOriginal;
+  final String? notes;
+  final String? expenseId;
+  final DateTime occurredAt;
+  final DateTime createdAt;
+  const MaterialUsageRow({
+    required this.id,
+    required this.projectId,
+    required this.inventoryItemId,
+    required this.kind,
+    required this.quantityBase,
+    required this.unitBase,
+    this.quantityOriginal,
+    this.unitOriginal,
+    this.notes,
+    this.expenseId,
+    required this.occurredAt,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['project_id'] = Variable<String>(projectId);
+    map['inventory_item_id'] = Variable<String>(inventoryItemId);
+    map['kind'] = Variable<String>(kind);
+    map['quantity_base'] = Variable<double>(quantityBase);
+    map['unit_base'] = Variable<String>(unitBase);
+    if (!nullToAbsent || quantityOriginal != null) {
+      map['quantity_original'] = Variable<double>(quantityOriginal);
+    }
+    if (!nullToAbsent || unitOriginal != null) {
+      map['unit_original'] = Variable<String>(unitOriginal);
+    }
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    if (!nullToAbsent || expenseId != null) {
+      map['expense_id'] = Variable<String>(expenseId);
+    }
+    map['occurred_at'] = Variable<DateTime>(occurredAt);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  MaterialUsagesCompanion toCompanion(bool nullToAbsent) {
+    return MaterialUsagesCompanion(
+      id: Value(id),
+      projectId: Value(projectId),
+      inventoryItemId: Value(inventoryItemId),
+      kind: Value(kind),
+      quantityBase: Value(quantityBase),
+      unitBase: Value(unitBase),
+      quantityOriginal: quantityOriginal == null && nullToAbsent
+          ? const Value.absent()
+          : Value(quantityOriginal),
+      unitOriginal: unitOriginal == null && nullToAbsent
+          ? const Value.absent()
+          : Value(unitOriginal),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+      expenseId: expenseId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(expenseId),
+      occurredAt: Value(occurredAt),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory MaterialUsageRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MaterialUsageRow(
+      id: serializer.fromJson<String>(json['id']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      inventoryItemId: serializer.fromJson<String>(json['inventoryItemId']),
+      kind: serializer.fromJson<String>(json['kind']),
+      quantityBase: serializer.fromJson<double>(json['quantityBase']),
+      unitBase: serializer.fromJson<String>(json['unitBase']),
+      quantityOriginal: serializer.fromJson<double?>(json['quantityOriginal']),
+      unitOriginal: serializer.fromJson<String?>(json['unitOriginal']),
+      notes: serializer.fromJson<String?>(json['notes']),
+      expenseId: serializer.fromJson<String?>(json['expenseId']),
+      occurredAt: serializer.fromJson<DateTime>(json['occurredAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'projectId': serializer.toJson<String>(projectId),
+      'inventoryItemId': serializer.toJson<String>(inventoryItemId),
+      'kind': serializer.toJson<String>(kind),
+      'quantityBase': serializer.toJson<double>(quantityBase),
+      'unitBase': serializer.toJson<String>(unitBase),
+      'quantityOriginal': serializer.toJson<double?>(quantityOriginal),
+      'unitOriginal': serializer.toJson<String?>(unitOriginal),
+      'notes': serializer.toJson<String?>(notes),
+      'expenseId': serializer.toJson<String?>(expenseId),
+      'occurredAt': serializer.toJson<DateTime>(occurredAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  MaterialUsageRow copyWith({
+    String? id,
+    String? projectId,
+    String? inventoryItemId,
+    String? kind,
+    double? quantityBase,
+    String? unitBase,
+    Value<double?> quantityOriginal = const Value.absent(),
+    Value<String?> unitOriginal = const Value.absent(),
+    Value<String?> notes = const Value.absent(),
+    Value<String?> expenseId = const Value.absent(),
+    DateTime? occurredAt,
+    DateTime? createdAt,
+  }) => MaterialUsageRow(
+    id: id ?? this.id,
+    projectId: projectId ?? this.projectId,
+    inventoryItemId: inventoryItemId ?? this.inventoryItemId,
+    kind: kind ?? this.kind,
+    quantityBase: quantityBase ?? this.quantityBase,
+    unitBase: unitBase ?? this.unitBase,
+    quantityOriginal: quantityOriginal.present
+        ? quantityOriginal.value
+        : this.quantityOriginal,
+    unitOriginal: unitOriginal.present ? unitOriginal.value : this.unitOriginal,
+    notes: notes.present ? notes.value : this.notes,
+    expenseId: expenseId.present ? expenseId.value : this.expenseId,
+    occurredAt: occurredAt ?? this.occurredAt,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  MaterialUsageRow copyWithCompanion(MaterialUsagesCompanion data) {
+    return MaterialUsageRow(
+      id: data.id.present ? data.id.value : this.id,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      inventoryItemId: data.inventoryItemId.present
+          ? data.inventoryItemId.value
+          : this.inventoryItemId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      quantityBase: data.quantityBase.present
+          ? data.quantityBase.value
+          : this.quantityBase,
+      unitBase: data.unitBase.present ? data.unitBase.value : this.unitBase,
+      quantityOriginal: data.quantityOriginal.present
+          ? data.quantityOriginal.value
+          : this.quantityOriginal,
+      unitOriginal: data.unitOriginal.present
+          ? data.unitOriginal.value
+          : this.unitOriginal,
+      notes: data.notes.present ? data.notes.value : this.notes,
+      expenseId: data.expenseId.present ? data.expenseId.value : this.expenseId,
+      occurredAt: data.occurredAt.present
+          ? data.occurredAt.value
+          : this.occurredAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MaterialUsageRow(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('inventoryItemId: $inventoryItemId, ')
+          ..write('kind: $kind, ')
+          ..write('quantityBase: $quantityBase, ')
+          ..write('unitBase: $unitBase, ')
+          ..write('quantityOriginal: $quantityOriginal, ')
+          ..write('unitOriginal: $unitOriginal, ')
+          ..write('notes: $notes, ')
+          ..write('expenseId: $expenseId, ')
+          ..write('occurredAt: $occurredAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    projectId,
+    inventoryItemId,
+    kind,
+    quantityBase,
+    unitBase,
+    quantityOriginal,
+    unitOriginal,
+    notes,
+    expenseId,
+    occurredAt,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MaterialUsageRow &&
+          other.id == this.id &&
+          other.projectId == this.projectId &&
+          other.inventoryItemId == this.inventoryItemId &&
+          other.kind == this.kind &&
+          other.quantityBase == this.quantityBase &&
+          other.unitBase == this.unitBase &&
+          other.quantityOriginal == this.quantityOriginal &&
+          other.unitOriginal == this.unitOriginal &&
+          other.notes == this.notes &&
+          other.expenseId == this.expenseId &&
+          other.occurredAt == this.occurredAt &&
+          other.createdAt == this.createdAt);
+}
+
+class MaterialUsagesCompanion extends UpdateCompanion<MaterialUsageRow> {
+  final Value<String> id;
+  final Value<String> projectId;
+  final Value<String> inventoryItemId;
+  final Value<String> kind;
+  final Value<double> quantityBase;
+  final Value<String> unitBase;
+  final Value<double?> quantityOriginal;
+  final Value<String?> unitOriginal;
+  final Value<String?> notes;
+  final Value<String?> expenseId;
+  final Value<DateTime> occurredAt;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const MaterialUsagesCompanion({
+    this.id = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.inventoryItemId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.quantityBase = const Value.absent(),
+    this.unitBase = const Value.absent(),
+    this.quantityOriginal = const Value.absent(),
+    this.unitOriginal = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.expenseId = const Value.absent(),
+    this.occurredAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MaterialUsagesCompanion.insert({
+    required String id,
+    required String projectId,
+    required String inventoryItemId,
+    required String kind,
+    required double quantityBase,
+    required String unitBase,
+    this.quantityOriginal = const Value.absent(),
+    this.unitOriginal = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.expenseId = const Value.absent(),
+    required DateTime occurredAt,
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       projectId = Value(projectId),
+       inventoryItemId = Value(inventoryItemId),
+       kind = Value(kind),
+       quantityBase = Value(quantityBase),
+       unitBase = Value(unitBase),
+       occurredAt = Value(occurredAt),
+       createdAt = Value(createdAt);
+  static Insertable<MaterialUsageRow> custom({
+    Expression<String>? id,
+    Expression<String>? projectId,
+    Expression<String>? inventoryItemId,
+    Expression<String>? kind,
+    Expression<double>? quantityBase,
+    Expression<String>? unitBase,
+    Expression<double>? quantityOriginal,
+    Expression<String>? unitOriginal,
+    Expression<String>? notes,
+    Expression<String>? expenseId,
+    Expression<DateTime>? occurredAt,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (projectId != null) 'project_id': projectId,
+      if (inventoryItemId != null) 'inventory_item_id': inventoryItemId,
+      if (kind != null) 'kind': kind,
+      if (quantityBase != null) 'quantity_base': quantityBase,
+      if (unitBase != null) 'unit_base': unitBase,
+      if (quantityOriginal != null) 'quantity_original': quantityOriginal,
+      if (unitOriginal != null) 'unit_original': unitOriginal,
+      if (notes != null) 'notes': notes,
+      if (expenseId != null) 'expense_id': expenseId,
+      if (occurredAt != null) 'occurred_at': occurredAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MaterialUsagesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? projectId,
+    Value<String>? inventoryItemId,
+    Value<String>? kind,
+    Value<double>? quantityBase,
+    Value<String>? unitBase,
+    Value<double?>? quantityOriginal,
+    Value<String?>? unitOriginal,
+    Value<String?>? notes,
+    Value<String?>? expenseId,
+    Value<DateTime>? occurredAt,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return MaterialUsagesCompanion(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      inventoryItemId: inventoryItemId ?? this.inventoryItemId,
+      kind: kind ?? this.kind,
+      quantityBase: quantityBase ?? this.quantityBase,
+      unitBase: unitBase ?? this.unitBase,
+      quantityOriginal: quantityOriginal ?? this.quantityOriginal,
+      unitOriginal: unitOriginal ?? this.unitOriginal,
+      notes: notes ?? this.notes,
+      expenseId: expenseId ?? this.expenseId,
+      occurredAt: occurredAt ?? this.occurredAt,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (inventoryItemId.present) {
+      map['inventory_item_id'] = Variable<String>(inventoryItemId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (quantityBase.present) {
+      map['quantity_base'] = Variable<double>(quantityBase.value);
+    }
+    if (unitBase.present) {
+      map['unit_base'] = Variable<String>(unitBase.value);
+    }
+    if (quantityOriginal.present) {
+      map['quantity_original'] = Variable<double>(quantityOriginal.value);
+    }
+    if (unitOriginal.present) {
+      map['unit_original'] = Variable<String>(unitOriginal.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (expenseId.present) {
+      map['expense_id'] = Variable<String>(expenseId.value);
+    }
+    if (occurredAt.present) {
+      map['occurred_at'] = Variable<DateTime>(occurredAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MaterialUsagesCompanion(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('inventoryItemId: $inventoryItemId, ')
+          ..write('kind: $kind, ')
+          ..write('quantityBase: $quantityBase, ')
+          ..write('unitBase: $unitBase, ')
+          ..write('quantityOriginal: $quantityOriginal, ')
+          ..write('unitOriginal: $unitOriginal, ')
+          ..write('notes: $notes, ')
+          ..write('expenseId: $expenseId, ')
+          ..write('occurredAt: $occurredAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4572,6 +5994,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SettingsTable settings = $SettingsTable(this);
   late final $UsersTable users = $UsersTable(this);
   late final $ProjectTagsTable projectTags = $ProjectTagsTable(this);
+  late final $InventoryItemsTable inventoryItems = $InventoryItemsTable(this);
+  late final $MaterialUsagesTable materialUsages = $MaterialUsagesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4586,6 +6010,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     settings,
     users,
     projectTags,
+    inventoryItems,
+    materialUsages,
   ];
 }
 
@@ -4681,6 +6107,48 @@ final class $$ProjectsTableReferences
     ).filter((f) => f.projectId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_projectTagsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$InventoryItemsTable, List<InventoryItemRow>>
+  _inventoryItemsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.inventoryItems,
+    aliasName: $_aliasNameGenerator(
+      db.projects.id,
+      db.inventoryItems.projectId,
+    ),
+  );
+
+  $$InventoryItemsTableProcessedTableManager get inventoryItemsRefs {
+    final manager = $$InventoryItemsTableTableManager(
+      $_db,
+      $_db.inventoryItems,
+    ).filter((f) => f.projectId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_inventoryItemsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$MaterialUsagesTable, List<MaterialUsageRow>>
+  _materialUsagesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.materialUsages,
+    aliasName: $_aliasNameGenerator(
+      db.projects.id,
+      db.materialUsages.projectId,
+    ),
+  );
+
+  $$MaterialUsagesTableProcessedTableManager get materialUsagesRefs {
+    final manager = $$MaterialUsagesTableTableManager(
+      $_db,
+      $_db.materialUsages,
+    ).filter((f) => f.projectId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_materialUsagesRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -4832,6 +6300,56 @@ class $$ProjectsTableFilterComposer
           }) => $$ProjectTagsTableFilterComposer(
             $db: $db,
             $table: $db.projectTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> inventoryItemsRefs(
+    Expression<bool> Function($$InventoryItemsTableFilterComposer f) f,
+  ) {
+    final $$InventoryItemsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inventoryItems,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InventoryItemsTableFilterComposer(
+            $db: $db,
+            $table: $db.inventoryItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> materialUsagesRefs(
+    Expression<bool> Function($$MaterialUsagesTableFilterComposer f) f,
+  ) {
+    final $$MaterialUsagesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.materialUsages,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MaterialUsagesTableFilterComposer(
+            $db: $db,
+            $table: $db.materialUsages,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -5049,6 +6567,56 @@ class $$ProjectsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> inventoryItemsRefs<T extends Object>(
+    Expression<T> Function($$InventoryItemsTableAnnotationComposer a) f,
+  ) {
+    final $$InventoryItemsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.inventoryItems,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InventoryItemsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inventoryItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<T> materialUsagesRefs<T extends Object>(
+    Expression<T> Function($$MaterialUsagesTableAnnotationComposer a) f,
+  ) {
+    final $$MaterialUsagesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.materialUsages,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MaterialUsagesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.materialUsages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$ProjectsTableTableManager
@@ -5068,6 +6636,8 @@ class $$ProjectsTableTableManager
             bool expensesRefs,
             bool tasksRefs,
             bool projectTagsRefs,
+            bool inventoryItemsRefs,
+            bool materialUsagesRefs,
           })
         > {
   $$ProjectsTableTableManager(_$AppDatabase db, $ProjectsTable table)
@@ -5162,6 +6732,8 @@ class $$ProjectsTableTableManager
                 expensesRefs = false,
                 tasksRefs = false,
                 projectTagsRefs = false,
+                inventoryItemsRefs = false,
+                materialUsagesRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
@@ -5169,6 +6741,8 @@ class $$ProjectsTableTableManager
                     if (expensesRefs) db.expenses,
                     if (tasksRefs) db.tasks,
                     if (projectTagsRefs) db.projectTags,
+                    if (inventoryItemsRefs) db.inventoryItems,
+                    if (materialUsagesRefs) db.materialUsages,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -5236,6 +6810,48 @@ class $$ProjectsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (inventoryItemsRefs)
+                        await $_getPrefetchedData<
+                          Project,
+                          $ProjectsTable,
+                          InventoryItemRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ProjectsTableReferences
+                              ._inventoryItemsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ProjectsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).inventoryItemsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.projectId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (materialUsagesRefs)
+                        await $_getPrefetchedData<
+                          Project,
+                          $ProjectsTable,
+                          MaterialUsageRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ProjectsTableReferences
+                              ._materialUsagesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ProjectsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).materialUsagesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.projectId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -5260,6 +6876,8 @@ typedef $$ProjectsTableProcessedTableManager =
         bool expensesRefs,
         bool tasksRefs,
         bool projectTagsRefs,
+        bool inventoryItemsRefs,
+        bool materialUsagesRefs,
       })
     >;
 typedef $$ExpensesTableCreateCompanionBuilder =
@@ -7714,6 +9332,1113 @@ typedef $$ProjectTagsTableProcessedTableManager =
       ProjectTag,
       PrefetchHooks Function({bool projectId})
     >;
+typedef $$InventoryItemsTableCreateCompanionBuilder =
+    InventoryItemsCompanion Function({
+      required String id,
+      required String projectId,
+      required String name,
+      required String nameKey,
+      Value<double> quantityBase,
+      required String unitBase,
+      Value<String?> preferredUnitId,
+      Value<double> reorderLevel,
+      Value<String?> notes,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$InventoryItemsTableUpdateCompanionBuilder =
+    InventoryItemsCompanion Function({
+      Value<String> id,
+      Value<String> projectId,
+      Value<String> name,
+      Value<String> nameKey,
+      Value<double> quantityBase,
+      Value<String> unitBase,
+      Value<String?> preferredUnitId,
+      Value<double> reorderLevel,
+      Value<String?> notes,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$InventoryItemsTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $InventoryItemsTable, InventoryItemRow> {
+  $$InventoryItemsTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ProjectsTable _projectIdTable(_$AppDatabase db) =>
+      db.projects.createAlias(
+        $_aliasNameGenerator(db.inventoryItems.projectId, db.projects.id),
+      );
+
+  $$ProjectsTableProcessedTableManager get projectId {
+    final $_column = $_itemColumn<String>('project_id')!;
+
+    final manager = $$ProjectsTableTableManager(
+      $_db,
+      $_db.projects,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_projectIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static MultiTypedResultKey<$MaterialUsagesTable, List<MaterialUsageRow>>
+  _materialUsagesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.materialUsages,
+    aliasName: $_aliasNameGenerator(
+      db.inventoryItems.id,
+      db.materialUsages.inventoryItemId,
+    ),
+  );
+
+  $$MaterialUsagesTableProcessedTableManager get materialUsagesRefs {
+    final manager = $$MaterialUsagesTableTableManager($_db, $_db.materialUsages)
+        .filter(
+          (f) => f.inventoryItemId.id.sqlEquals($_itemColumn<String>('id')!),
+        );
+
+    final cache = $_typedResult.readTableOrNull(_materialUsagesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+}
+
+class $$InventoryItemsTableFilterComposer
+    extends Composer<_$AppDatabase, $InventoryItemsTable> {
+  $$InventoryItemsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nameKey => $composableBuilder(
+    column: $table.nameKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unitBase => $composableBuilder(
+    column: $table.unitBase,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get preferredUnitId => $composableBuilder(
+    column: $table.preferredUnitId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ProjectsTableFilterComposer get projectId {
+    final $$ProjectsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableFilterComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<bool> materialUsagesRefs(
+    Expression<bool> Function($$MaterialUsagesTableFilterComposer f) f,
+  ) {
+    final $$MaterialUsagesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.materialUsages,
+      getReferencedColumn: (t) => t.inventoryItemId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MaterialUsagesTableFilterComposer(
+            $db: $db,
+            $table: $db.materialUsages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$InventoryItemsTableOrderingComposer
+    extends Composer<_$AppDatabase, $InventoryItemsTable> {
+  $$InventoryItemsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nameKey => $composableBuilder(
+    column: $table.nameKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unitBase => $composableBuilder(
+    column: $table.unitBase,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get preferredUnitId => $composableBuilder(
+    column: $table.preferredUnitId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ProjectsTableOrderingComposer get projectId {
+    final $$ProjectsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableOrderingComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$InventoryItemsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $InventoryItemsTable> {
+  $$InventoryItemsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get nameKey =>
+      $composableBuilder(column: $table.nameKey, builder: (column) => column);
+
+  GeneratedColumn<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get unitBase =>
+      $composableBuilder(column: $table.unitBase, builder: (column) => column);
+
+  GeneratedColumn<String> get preferredUnitId => $composableBuilder(
+    column: $table.preferredUnitId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get reorderLevel => $composableBuilder(
+    column: $table.reorderLevel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$ProjectsTableAnnotationComposer get projectId {
+    final $$ProjectsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  Expression<T> materialUsagesRefs<T extends Object>(
+    Expression<T> Function($$MaterialUsagesTableAnnotationComposer a) f,
+  ) {
+    final $$MaterialUsagesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.materialUsages,
+      getReferencedColumn: (t) => t.inventoryItemId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$MaterialUsagesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.materialUsages,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+}
+
+class $$InventoryItemsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $InventoryItemsTable,
+          InventoryItemRow,
+          $$InventoryItemsTableFilterComposer,
+          $$InventoryItemsTableOrderingComposer,
+          $$InventoryItemsTableAnnotationComposer,
+          $$InventoryItemsTableCreateCompanionBuilder,
+          $$InventoryItemsTableUpdateCompanionBuilder,
+          (InventoryItemRow, $$InventoryItemsTableReferences),
+          InventoryItemRow,
+          PrefetchHooks Function({bool projectId, bool materialUsagesRefs})
+        > {
+  $$InventoryItemsTableTableManager(
+    _$AppDatabase db,
+    $InventoryItemsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$InventoryItemsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$InventoryItemsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$InventoryItemsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> nameKey = const Value.absent(),
+                Value<double> quantityBase = const Value.absent(),
+                Value<String> unitBase = const Value.absent(),
+                Value<String?> preferredUnitId = const Value.absent(),
+                Value<double> reorderLevel = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => InventoryItemsCompanion(
+                id: id,
+                projectId: projectId,
+                name: name,
+                nameKey: nameKey,
+                quantityBase: quantityBase,
+                unitBase: unitBase,
+                preferredUnitId: preferredUnitId,
+                reorderLevel: reorderLevel,
+                notes: notes,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String projectId,
+                required String name,
+                required String nameKey,
+                Value<double> quantityBase = const Value.absent(),
+                required String unitBase,
+                Value<String?> preferredUnitId = const Value.absent(),
+                Value<double> reorderLevel = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => InventoryItemsCompanion.insert(
+                id: id,
+                projectId: projectId,
+                name: name,
+                nameKey: nameKey,
+                quantityBase: quantityBase,
+                unitBase: unitBase,
+                preferredUnitId: preferredUnitId,
+                reorderLevel: reorderLevel,
+                notes: notes,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$InventoryItemsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback:
+              ({projectId = false, materialUsagesRefs = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (materialUsagesRefs) db.materialUsages,
+                  ],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (projectId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.projectId,
+                                    referencedTable:
+                                        $$InventoryItemsTableReferences
+                                            ._projectIdTable(db),
+                                    referencedColumn:
+                                        $$InventoryItemsTableReferences
+                                            ._projectIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (materialUsagesRefs)
+                        await $_getPrefetchedData<
+                          InventoryItemRow,
+                          $InventoryItemsTable,
+                          MaterialUsageRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$InventoryItemsTableReferences
+                              ._materialUsagesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$InventoryItemsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).materialUsagesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.inventoryItemId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
+                  },
+                );
+              },
+        ),
+      );
+}
+
+typedef $$InventoryItemsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $InventoryItemsTable,
+      InventoryItemRow,
+      $$InventoryItemsTableFilterComposer,
+      $$InventoryItemsTableOrderingComposer,
+      $$InventoryItemsTableAnnotationComposer,
+      $$InventoryItemsTableCreateCompanionBuilder,
+      $$InventoryItemsTableUpdateCompanionBuilder,
+      (InventoryItemRow, $$InventoryItemsTableReferences),
+      InventoryItemRow,
+      PrefetchHooks Function({bool projectId, bool materialUsagesRefs})
+    >;
+typedef $$MaterialUsagesTableCreateCompanionBuilder =
+    MaterialUsagesCompanion Function({
+      required String id,
+      required String projectId,
+      required String inventoryItemId,
+      required String kind,
+      required double quantityBase,
+      required String unitBase,
+      Value<double?> quantityOriginal,
+      Value<String?> unitOriginal,
+      Value<String?> notes,
+      Value<String?> expenseId,
+      required DateTime occurredAt,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$MaterialUsagesTableUpdateCompanionBuilder =
+    MaterialUsagesCompanion Function({
+      Value<String> id,
+      Value<String> projectId,
+      Value<String> inventoryItemId,
+      Value<String> kind,
+      Value<double> quantityBase,
+      Value<String> unitBase,
+      Value<double?> quantityOriginal,
+      Value<String?> unitOriginal,
+      Value<String?> notes,
+      Value<String?> expenseId,
+      Value<DateTime> occurredAt,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+final class $$MaterialUsagesTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $MaterialUsagesTable, MaterialUsageRow> {
+  $$MaterialUsagesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ProjectsTable _projectIdTable(_$AppDatabase db) =>
+      db.projects.createAlias(
+        $_aliasNameGenerator(db.materialUsages.projectId, db.projects.id),
+      );
+
+  $$ProjectsTableProcessedTableManager get projectId {
+    final $_column = $_itemColumn<String>('project_id')!;
+
+    final manager = $$ProjectsTableTableManager(
+      $_db,
+      $_db.projects,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_projectIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $InventoryItemsTable _inventoryItemIdTable(_$AppDatabase db) =>
+      db.inventoryItems.createAlias(
+        $_aliasNameGenerator(
+          db.materialUsages.inventoryItemId,
+          db.inventoryItems.id,
+        ),
+      );
+
+  $$InventoryItemsTableProcessedTableManager get inventoryItemId {
+    final $_column = $_itemColumn<String>('inventory_item_id')!;
+
+    final manager = $$InventoryItemsTableTableManager(
+      $_db,
+      $_db.inventoryItems,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_inventoryItemIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$MaterialUsagesTableFilterComposer
+    extends Composer<_$AppDatabase, $MaterialUsagesTable> {
+  $$MaterialUsagesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unitBase => $composableBuilder(
+    column: $table.unitBase,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get quantityOriginal => $composableBuilder(
+    column: $table.quantityOriginal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get unitOriginal => $composableBuilder(
+    column: $table.unitOriginal,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get expenseId => $composableBuilder(
+    column: $table.expenseId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ProjectsTableFilterComposer get projectId {
+    final $$ProjectsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableFilterComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$InventoryItemsTableFilterComposer get inventoryItemId {
+    final $$InventoryItemsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.inventoryItemId,
+      referencedTable: $db.inventoryItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InventoryItemsTableFilterComposer(
+            $db: $db,
+            $table: $db.inventoryItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MaterialUsagesTableOrderingComposer
+    extends Composer<_$AppDatabase, $MaterialUsagesTable> {
+  $$MaterialUsagesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unitBase => $composableBuilder(
+    column: $table.unitBase,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get quantityOriginal => $composableBuilder(
+    column: $table.quantityOriginal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get unitOriginal => $composableBuilder(
+    column: $table.unitOriginal,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get expenseId => $composableBuilder(
+    column: $table.expenseId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ProjectsTableOrderingComposer get projectId {
+    final $$ProjectsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableOrderingComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$InventoryItemsTableOrderingComposer get inventoryItemId {
+    final $$InventoryItemsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.inventoryItemId,
+      referencedTable: $db.inventoryItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InventoryItemsTableOrderingComposer(
+            $db: $db,
+            $table: $db.inventoryItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MaterialUsagesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MaterialUsagesTable> {
+  $$MaterialUsagesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<double> get quantityBase => $composableBuilder(
+    column: $table.quantityBase,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get unitBase =>
+      $composableBuilder(column: $table.unitBase, builder: (column) => column);
+
+  GeneratedColumn<double> get quantityOriginal => $composableBuilder(
+    column: $table.quantityOriginal,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get unitOriginal => $composableBuilder(
+    column: $table.unitOriginal,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+
+  GeneratedColumn<String> get expenseId =>
+      $composableBuilder(column: $table.expenseId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get occurredAt => $composableBuilder(
+    column: $table.occurredAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$ProjectsTableAnnotationComposer get projectId {
+    final $$ProjectsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$InventoryItemsTableAnnotationComposer get inventoryItemId {
+    final $$InventoryItemsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.inventoryItemId,
+      referencedTable: $db.inventoryItems,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$InventoryItemsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.inventoryItems,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$MaterialUsagesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MaterialUsagesTable,
+          MaterialUsageRow,
+          $$MaterialUsagesTableFilterComposer,
+          $$MaterialUsagesTableOrderingComposer,
+          $$MaterialUsagesTableAnnotationComposer,
+          $$MaterialUsagesTableCreateCompanionBuilder,
+          $$MaterialUsagesTableUpdateCompanionBuilder,
+          (MaterialUsageRow, $$MaterialUsagesTableReferences),
+          MaterialUsageRow,
+          PrefetchHooks Function({bool projectId, bool inventoryItemId})
+        > {
+  $$MaterialUsagesTableTableManager(
+    _$AppDatabase db,
+    $MaterialUsagesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MaterialUsagesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MaterialUsagesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MaterialUsagesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<String> inventoryItemId = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<double> quantityBase = const Value.absent(),
+                Value<String> unitBase = const Value.absent(),
+                Value<double?> quantityOriginal = const Value.absent(),
+                Value<String?> unitOriginal = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<String?> expenseId = const Value.absent(),
+                Value<DateTime> occurredAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => MaterialUsagesCompanion(
+                id: id,
+                projectId: projectId,
+                inventoryItemId: inventoryItemId,
+                kind: kind,
+                quantityBase: quantityBase,
+                unitBase: unitBase,
+                quantityOriginal: quantityOriginal,
+                unitOriginal: unitOriginal,
+                notes: notes,
+                expenseId: expenseId,
+                occurredAt: occurredAt,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String projectId,
+                required String inventoryItemId,
+                required String kind,
+                required double quantityBase,
+                required String unitBase,
+                Value<double?> quantityOriginal = const Value.absent(),
+                Value<String?> unitOriginal = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<String?> expenseId = const Value.absent(),
+                required DateTime occurredAt,
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => MaterialUsagesCompanion.insert(
+                id: id,
+                projectId: projectId,
+                inventoryItemId: inventoryItemId,
+                kind: kind,
+                quantityBase: quantityBase,
+                unitBase: unitBase,
+                quantityOriginal: quantityOriginal,
+                unitOriginal: unitOriginal,
+                notes: notes,
+                expenseId: expenseId,
+                occurredAt: occurredAt,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$MaterialUsagesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback:
+              ({projectId = false, inventoryItemId = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (projectId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.projectId,
+                                    referencedTable:
+                                        $$MaterialUsagesTableReferences
+                                            ._projectIdTable(db),
+                                    referencedColumn:
+                                        $$MaterialUsagesTableReferences
+                                            ._projectIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (inventoryItemId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.inventoryItemId,
+                                    referencedTable:
+                                        $$MaterialUsagesTableReferences
+                                            ._inventoryItemIdTable(db),
+                                    referencedColumn:
+                                        $$MaterialUsagesTableReferences
+                                            ._inventoryItemIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [];
+                  },
+                );
+              },
+        ),
+      );
+}
+
+typedef $$MaterialUsagesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MaterialUsagesTable,
+      MaterialUsageRow,
+      $$MaterialUsagesTableFilterComposer,
+      $$MaterialUsagesTableOrderingComposer,
+      $$MaterialUsagesTableAnnotationComposer,
+      $$MaterialUsagesTableCreateCompanionBuilder,
+      $$MaterialUsagesTableUpdateCompanionBuilder,
+      (MaterialUsageRow, $$MaterialUsagesTableReferences),
+      MaterialUsageRow,
+      PrefetchHooks Function({bool projectId, bool inventoryItemId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7736,4 +10461,8 @@ class $AppDatabaseManager {
       $$UsersTableTableManager(_db, _db.users);
   $$ProjectTagsTableTableManager get projectTags =>
       $$ProjectTagsTableTableManager(_db, _db.projectTags);
+  $$InventoryItemsTableTableManager get inventoryItems =>
+      $$InventoryItemsTableTableManager(_db, _db.inventoryItems);
+  $$MaterialUsagesTableTableManager get materialUsages =>
+      $$MaterialUsagesTableTableManager(_db, _db.materialUsages);
 }

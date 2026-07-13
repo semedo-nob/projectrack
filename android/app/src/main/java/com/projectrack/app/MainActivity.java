@@ -1,4 +1,4 @@
-package com.example.projectrack1;
+package com.projectrack.app;
 
 import io.flutter.embedding.android.FlutterFragmentActivity;
 
