@@ -12,6 +12,9 @@ class ProjectCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool isListView;
+  final int taskTotal;
+  final int taskOpen;
+  final int taskDone;
 
   const ProjectCard({
     super.key,
@@ -21,6 +24,9 @@ class ProjectCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.isListView = false,
+    this.taskTotal = 0,
+    this.taskOpen = 0,
+    this.taskDone = 0,
   });
 
   @override
@@ -115,6 +121,8 @@ class ProjectCard extends StatelessWidget {
                         _buildBudget(context),
                         const SizedBox(height: 6),
                         _buildProgressBar(),
+                        const SizedBox(height: 8),
+                        if (taskTotal > 0) _buildTaskSummaryRow(),
                         if (project.tags.isNotEmpty) ...[
                           const SizedBox(height: 6),
                           _buildTags(),
@@ -219,6 +227,8 @@ class ProjectCard extends StatelessWidget {
 
                   // Progress Bar
                   _buildProgressBar(),
+                  const SizedBox(height: 8),
+                  if (taskTotal > 0) _buildTaskSummaryRow(),
 
                   // Tags - optional
                   if (project.tags.isNotEmpty) ...[
@@ -313,6 +323,48 @@ class ProjectCard extends StatelessWidget {
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTaskSummaryRow() {
+    final completion = taskTotal > 0 ? (taskDone / taskTotal) : 0.0;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkBackground : AppColors.primarySubtle,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.task_alt_rounded,
+                size: 12,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '$taskOpen open',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? AppColors.darkText : AppColors.lightText,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${(completion * 100).round()}% done',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: AppColors.success,
+          ),
         ),
       ],
     );

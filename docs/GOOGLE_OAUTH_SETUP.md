@@ -2,23 +2,43 @@
 
 ProjectRack uses `google_sign_in` plus Google Drive `appDataFolder` backup for account sync.
 
+**Android package / applicationId:** `com.projectrack.app`  
+**iOS / macOS bundle ID:** `com.projectrack.app`
+
 ## Android
 
-1. Open Google Cloud Console.
+1. Open [Google Cloud Console](https://console.cloud.google.com).
 2. Create or select the project used for ProjectRack.
-3. Enable Google Drive API.
-4. Configure the OAuth consent screen.
-5. Create an Android OAuth client.
-6. Use package name: `com.example.projectrack1` unless you have changed it.
-7. Add SHA-1 and SHA-256 fingerprints for your debug and release keystores.
-8. Add your tester accounts on the consent screen if the app is in testing mode.
+3. Enable **Google Drive API**.
+4. Configure the **OAuth consent screen**.
+5. Create an **Android** OAuth 2.0 client.
+6. Set package name to: `com.projectrack.app`
+7. Add **SHA-1** and **SHA-256** fingerprints for your debug and release keystores:
+
+   ```bash
+   # Debug keystore (default Flutter/Android Studio debug key)
+   keytool -list -v -alias androiddebugkey \
+     -keystore ~/.android/debug.keystore \
+     -storepass android -keypass android
+   ```
+
+8. Add tester accounts on the consent screen if the app is in testing mode.
 9. If Google sign-in throws `ApiException: 10`, the package name or SHA fingerprints do not match the installed app build.
+
+### After changing applicationId
+
+If you previously registered `com.example.projectrack1`:
+
+1. Edit (or recreate) the Android OAuth client.
+2. Change the package name to `com.projectrack.app`.
+3. Keep the same SHA-1/SHA-256 unless you rotated signing keys.
+4. Save, wait a few minutes, uninstall the old app from the device, then install a fresh build.
 
 ## iOS
 
-1. Create an iOS OAuth client in the same Google Cloud project.
-2. Use the app bundle identifier from Xcode.
-3. Copy the reversed client ID into `Info.plist` URL types before release.
+1. Create an **iOS** OAuth client in the same Google Cloud project.
+2. Use bundle identifier: `com.projectrack.app`
+3. Copy the **reversed client ID** into `ios/Runner/Info.plist` URL types before release.
 4. Confirm the Google Drive API is enabled for the same project.
 5. Add the `CFBundleURLTypes` entry with the reversed client ID before testing Google sign-in on iOS.
 
@@ -30,7 +50,7 @@ ProjectRack uses `google_sign_in` plus Google Drive `appDataFolder` backup for a
 
 ## Release Checklist
 
-- Replace `com.example.projectrack1` with your real production package if needed.
+- Confirm Android `applicationId` and iOS bundle ID are both `com.projectrack.app` in Google Cloud.
 - Register both debug and release signing keys.
 - Test sign-in on Android and iOS physical devices.
 - Test backup, reinstall, sign-in, and restore end to end.

@@ -1,5 +1,6 @@
 // lib/ui/projects/daily_material_entry_screen.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -10,15 +11,16 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
 import '../../service/display_unit_prefs.dart';
+import '../../service/inventory_service.dart';
 import '../../service/smart_unit_suggestion_service.dart';
 import '../../service/unit_service.dart';
-import '../../widgets/unit_aware_quantity_field.dart';
 
 class MaterialEntry {
   String materialName;
@@ -71,6 +73,26 @@ class MaterialEntry {
   }
 }
 
+class _MaterialTemplate {
+  final String materialName;
+  final String unitId;
+
+  const _MaterialTemplate({
+    required this.materialName,
+    required this.unitId,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'materialName': materialName,
+        'unitId': unitId,
+      };
+
+  static _MaterialTemplate fromJson(Map<String, dynamic> json) => _MaterialTemplate(
+        materialName: json['materialName'] as String? ?? '',
+        unitId: json['unitId'] as String? ?? 'u_kg',
+      );
+}
+
 class DailyMaterialEntryScreen extends StatefulWidget {
   final String projectId;
   final String projectName;
@@ -87,14 +109,21 @@ class DailyMaterialEntryScreen extends StatefulWidget {
 
 class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   List<MaterialEntry> _entries = [];
-  double _computedTotal = 0.0;
   DateTime _selectedDate = DateTime.now();
   bool _isSubmitting = false;
   String? _processingEntryId;
+  String? _duplicateHint;
   String _defaultMaterialUnitId = 'u_kg';
 
-  final Map<String, Timer?> _suggestionTimers = {};
-  final Map<String, List<UnitOption>> _suggestionsByEntryId = {};
+  double get _totalCost => _entries.fold(0.0, (sum, entry) => sum + entry.totalCost);
+
+  static const _templatePrefsKey = 'daily_material_template_list';
+  final List<_MaterialTemplate> _defaultTemplates = const [
+    _MaterialTemplate(materialName: 'Portland cement', unitId: 'u_kg'),
+    _MaterialTemplate(materialName: 'Sand (fine)', unitId: 'u_kg'),
+    _MaterialTemplate(materialName: 'Rebar 12mm', unitId: 'u_piece'),
+  ];
+  List<_MaterialTemplate> _templates = [];
 
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
@@ -129,6 +158,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   void initState() {
     super.initState();
     _loadDefaultMaterialUnit();
+    _loadTemplates();
     _addNewEntry();
   }
 
@@ -142,44 +172,102 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     });
   }
 
-  void _scheduleMaterialSuggestions(String entryId, String materialName) {
-    _suggestionTimers[entryId]?.cancel();
-    if (materialName.trim().length < 2) {
-      setState(() => _suggestionsByEntryId.remove(entryId));
+  Future<void> _loadTemplates() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_templatePrefsKey) ?? [];
+    final decoded = list
+        .map((item) => _MaterialTemplate.fromJson(json.decode(item) as Map<String, dynamic>))
+        .toList();
+    setState(() {
+      _templates = [..._defaultTemplates, ...decoded];
+    });
+  }
+
+  Future<void> _saveTemplates() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userTemplates = _templates
+        .skip(_defaultTemplates.length)
+        .map((template) => json.encode(template.toJson()))
+        .toList();
+    await prefs.setStringList(_templatePrefsKey, userTemplates);
+  }
+
+  Future<void> _addTemplateFromEntry(String entryId) async {
+    final entry = _entries.firstWhere((e) => e.id == entryId, orElse: () => _entries.first);
+    if (entry.materialName.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter a material name before saving a template.'),
+          backgroundColor: AppColors.warning,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
       return;
     }
-    _suggestionTimers[entryId] = Timer(const Duration(milliseconds: 400), () async {
-      final list =
-          await SmartUnitSuggestionService.suggestUnitsForMaterial(materialName);
-      if (!mounted) return;
-      setState(() {
-        _suggestionsByEntryId[entryId] = list;
-      });
-      final ix = _entries.indexWhere((e) => e.id == entryId);
-      if (ix < 0 || !mounted) return;
-      final entry = _entries[ix];
-      if (SmartUnitSuggestionService.keywordMatchForMaterial(materialName) &&
-          list.isNotEmpty) {
-        final ids = list.map((u) => u.id).toSet();
-        if (!ids.contains(entry.unitId)) {
-          _updateEntry(entryId, unitId: list.first.id);
-        }
-      }
+
+    final template = _MaterialTemplate(
+      materialName: entry.materialName.trim(),
+      unitId: entry.unitId,
+    );
+
+    setState(() {
+      _templates = [..._templates, template];
+      _duplicateHint = 'Template saved from ${entry.materialName.trim()}';
+    });
+    await _saveTemplates();
+  }
+
+  void _applyTemplate(_MaterialTemplate template) {
+    final blankEntry = _entries.firstWhere(
+      (entry) => entry.materialName.trim().isEmpty,
+      orElse: () {
+        _addNewEntry();
+        return _entries.last;
+      },
+    );
+
+    setState(() {
+      final index = _entries.indexOf(blankEntry);
+      _entries[index] = blankEntry.copyWith(
+        materialName: template.materialName,
+        unitId: template.unitId,
+      );
+      _duplicateHint = null;
+      _computeTotal();
+    });
+  }
+
+  void _duplicateEntry(String entryId) {
+    final original = _entries.firstWhere((entry) => entry.id == entryId);
+    final duplicate = MaterialEntry(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      materialName: original.materialName,
+      quantity: original.quantity,
+      unitId: original.unitId,
+      unitCost: original.unitCost,
+      merchant: original.merchant,
+      receiptImagePath: null,
+      receiptTag: original.receiptTag,
+      isReceiptValid: false,
+    );
+
+    setState(() {
+      _entries.add(duplicate);
+      _duplicateHint =
+          'Entry ${_entries.length} was duplicated from Entry ${_entries.indexOf(original) + 1} — update quantity or receipt as needed';
+      _computeTotal();
     });
   }
 
   @override
   void dispose() {
-    for (final t in _suggestionTimers.values) {
-      t?.cancel();
-    }
     _textRecognizer.close();
     super.dispose();
   }
 
   void _computeTotal() {
     setState(() {
-      _computedTotal = _entries.fold(0.0, (sum, entry) => sum + entry.totalCost);
+      // Rebuild and recalculate totals from the current entry list.
     });
   }
 
@@ -681,8 +769,9 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           unit: unit,
         );
 
+        final expenseId = 'exp_${baseId}_$i';
         final ok = await db.createExpense(
-          id: 'exp_${baseId}_$i',
+          id: expenseId,
           projectId: widget.projectId,
           merchant: e.merchant.trim(),
           amount: e.totalCost,
@@ -698,7 +787,22 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           unitBase: base.unitBase,
         );
 
-        if (ok) successCount++;
+        if (ok) {
+          successCount++;
+          try {
+            await InventoryService(db.database).recordPurchase(
+              projectId: widget.projectId,
+              materialName: e.materialName.trim(),
+              quantityOriginal: e.quantity,
+              unit: unit,
+              expenseId: expenseId,
+              notes: 'From material entry',
+              occurredAt: _selectedDate,
+            );
+          } catch (invErr) {
+            debugPrint('Inventory update skipped: $invErr');
+          }
+        }
       }
 
       if (!mounted) return;
@@ -745,106 +849,109 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     final theme = Theme.of(context);
     final currency = Provider.of<CurrencyProvider>(context);
 
+    final viewInsets = MediaQuery.of(context).viewInsets;
+
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: theme.scaffoldBackgroundColor,
-      body: Stack(
-        children: [
-          // Main Content
-          CustomScrollView(
-            slivers: [
-              // Top App Bar
-              SliverAppBar(
-                expandedHeight: 0,
-                floating: true,
-                pinned: true,
-                backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(0.8),
-                elevation: 0,
-                leading: Container(
-                  margin: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isDark
-                        ? Colors.white.withOpacity(0.1)
-                        : Colors.black.withOpacity(0.05),
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.arrow_back_rounded,
-                      color: theme.appBarTheme.foregroundColor,
-                      size: 20,
-                    ),
-                    onPressed: () => context.go(AppRoutes.home),
-                  ),
-                ),
-                title: Text(
-                  'Daily Material Entry',
-                  style: theme.appBarTheme.titleTextStyle,
-                ),
-                centerTitle: false,
-                actions: [
-                  Container(
-                    margin: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isDark
-                          ? Colors.white.withOpacity(0.1)
-                          : Colors.black.withOpacity(0.05),
-                    ),
-                    child: IconButton(
-                      icon: Icon(
-                        Icons.calendar_today_rounded,
-                        color: theme.appBarTheme.foregroundColor,
-                        size: 20,
-                      ),
-                      onPressed: () => _selectDate(context),
-                    ),
-                  ),
-                ],
+      body: CustomScrollView(
+        slivers: [
+          // Top App Bar
+          SliverAppBar(
+            expandedHeight: 0,
+            floating: true,
+            pinned: true,
+            backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(0.8),
+            elevation: 0,
+            leading: Container(
+              margin: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isDark
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.black.withOpacity(0.05),
               ),
-
-              // Content
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    const SizedBox(height: 8),
-
-                    // Project Context Header
-                    _buildProjectHeader(isDark),
-
-                    const SizedBox(height: 16),
-
-                    // Selected Date
-                    _buildDateHeader(isDark),
-
-                    const SizedBox(height: 24),
-
-                    // Material Entries List
-                    ...List.generate(_entries.length, (index) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: _buildMaterialEntryCard(isDark, _entries[index], currency),
-                      );
-                    }),
-
-                    // Add Row Button
-                    _buildAddEntryButton(isDark),
-
-                    const SizedBox(height: 200),
-                  ]),
+              child: IconButton(
+                icon: Icon(
+                  Icons.arrow_back_rounded,
+                  color: theme.appBarTheme.foregroundColor,
+                  size: 20,
+                ),
+                onPressed: () => context.go(AppRoutes.home),
+              ),
+            ),
+            title: Text(
+              'Daily Material Entry',
+              style: theme.appBarTheme.titleTextStyle,
+            ),
+            centerTitle: false,
+            actions: [
+              Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isDark
+                      ? Colors.white.withOpacity(0.1)
+                      : Colors.black.withOpacity(0.05),
+                ),
+                child: IconButton(
+                  icon: Icon(
+                    Icons.calendar_today_rounded,
+                    color: theme.appBarTheme.foregroundColor,
+                    size: 20,
+                  ),
+                  onPressed: () => _selectDate(context),
                 ),
               ),
             ],
           ),
 
-          // Fixed Footer
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: _buildFixedFooter(isDark, currency),
+          // Content
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                const SizedBox(height: 8),
+
+                // Project Context Header
+                _buildProjectHeader(isDark),
+
+                const SizedBox(height: 16),
+
+                // Selected Date
+                _buildDateHeader(isDark),
+
+                const SizedBox(height: 20),
+                _buildTemplatesStrip(isDark),
+
+                const SizedBox(height: 24),
+                _buildSummaryCard(isDark, currency),
+
+                const SizedBox(height: 24),
+
+                // Material Entries List
+                ...List.generate(_entries.length, (index) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    child: _buildMaterialEntryCard(isDark, _entries[index], currency),
+                  );
+                }),
+
+                // Add Row Button
+                _buildAddEntryButton(isDark),
+
+                const SizedBox(height: 120),
+              ]),
+            ),
           ),
         ],
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.only(bottom: viewInsets.bottom, left: 16, right: 16, top: 8),
+          child: _buildSubmitBar(isDark),
+        ),
       ),
     );
   }
@@ -856,17 +963,17 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         Text(
           'CURRENT PROJECT',
           style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.5,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
             color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Text(
           widget.projectName,
           style: TextStyle(
-            fontSize: 24,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
             color: isDark ? AppColors.darkText : AppColors.lightText,
           ),
@@ -877,7 +984,15 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
 
   Widget _buildDateHeader(bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : AppColors.lightBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 0.5,
+        ),
+      ),
       child: Row(
         children: [
           Icon(
@@ -885,13 +1000,13 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
             size: 16,
             color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
-            'Date: ${DateFormat('MMM d, yyyy').format(_selectedDate)}',
+            DateFormat('EEE, MMM d yyyy').format(_selectedDate),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w500,
-              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
             ),
           ),
         ],
@@ -899,8 +1014,108 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     );
   }
 
+  Widget _buildTemplatesStrip(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Templates — tap to prefill',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 42,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _templates.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (context, index) {
+              if (index == _templates.length) {
+                return GestureDetector(
+                  onTap: () {
+                    if (_entries.isNotEmpty) {
+                      _addTemplateFromEntry(_entries.last.id);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                        width: 1,
+                        style: BorderStyle.solid,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.add_rounded,
+                          color: AppColors.primary,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Save template',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final template = _templates[index];
+              return GestureDetector(
+                onTap: () => _applyTemplate(template),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkCard : AppColors.lightBackground,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.bolt_rounded,
+                        size: 14,
+                        color: isDark ? AppColors.darkText : AppColors.lightText,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        template.materialName,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.darkText : AppColors.lightText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMaterialEntryCard(bool isDark, MaterialEntry entry, CurrencyProvider currency) {
     final isProcessing = _processingEntryId == entry.id;
+    final entryIndex = _entries.indexOf(entry) + 1;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -915,67 +1130,81 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         ),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Entry #${_entries.indexOf(entry) + 1}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Entry $entryIndex',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      entry.materialName.isNotEmpty ? entry.materialName : 'Material name',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? AppColors.darkText : AppColors.lightText,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              IconButton(
-                icon: Icon(
-                  Icons.delete_rounded,
-                  color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
-                  size: 20,
-                ),
-                onPressed: () => _removeEntry(entry.id),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.copy_rounded,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                      size: 20,
+                    ),
+                    onPressed: () => _duplicateEntry(entry.id),
+                    tooltip: 'Duplicate entry',
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.bolt_rounded,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
+                      size: 20,
+                    ),
+                    onPressed: () => _addTemplateFromEntry(entry.id),
+                    tooltip: 'Save as template',
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_rounded,
+                      color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                      size: 20,
+                    ),
+                    onPressed: () => _removeEntry(entry.id),
+                    tooltip: 'Delete entry',
+                  ),
+                ],
               ),
             ],
           ),
 
           const SizedBox(height: 16),
 
-          // Material Name
           _buildTextField(
             isDark: isDark,
-            label: 'Material Name',
+            label: 'Material name',
             hint: 'e.g. Portland Cement',
             initialValue: entry.materialName,
-            onChanged: (value) {
-              _updateEntry(entry.id, materialName: value);
-              _scheduleMaterialSuggestions(entry.id, value);
-            },
-          ),
-
-          SuggestedUnitChips(
-            isDark: isDark,
-            suggestions: _suggestionsByEntryId[entry.id] ?? const [],
-            selectedUnitId: entry.unitId,
-            onSelect: (u) {
-              _updateEntry(entry.id, unitId: u.id);
-              SmartUnitSuggestionService.recordUnitPreference(
-                entry.materialName,
-                u.name,
-              );
-            },
+            onChanged: (value) => _updateEntry(entry.id, materialName: value),
           ),
 
           const SizedBox(height: 16),
 
-          // Quantity + unit + cost per unit
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -999,34 +1228,35 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: _buildUnitDropdown(isDark, entry),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 3,
+                child: Builder(
+                  builder: (context) {
+                    final u = UnitService.byId(entry.unitId);
+                    final unitLabel = u?.displayName ?? 'unit';
+                    return _buildTextField(
+                      isDark: isDark,
+                      label: 'Cost per $unitLabel',
+                      hint: '0.00',
+                      initialValue: entry.unitCost > 0 ? entry.unitCost.toStringAsFixed(2) : '',
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (value) {
+                        final cost = double.tryParse(value) ?? 0.0;
+                        _updateEntry(entry.id, unitCost: cost);
+                      },
+                    );
+                  },
+                ),
+              ),
             ],
-          ),
-          const SizedBox(height: 8),
-          Builder(
-            builder: (context) {
-              final u = UnitService.byId(entry.unitId);
-              final unitLabel = u?.displayName ?? 'unit';
-              return _buildTextField(
-                isDark: isDark,
-                label: 'Cost per $unitLabel (${currency.symbol})',
-                hint: '0.00',
-                initialValue:
-                    entry.unitCost > 0 ? entry.unitCost.toStringAsFixed(2) : '',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                onChanged: (value) {
-                  final cost = double.tryParse(value) ?? 0.0;
-                  _updateEntry(entry.id, unitCost: cost);
-                },
-              );
-            },
           ),
 
           const SizedBox(height: 16),
 
-          // Merchant
           _buildTextField(
             isDark: isDark,
             label: 'Merchant',
@@ -1037,142 +1267,55 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
 
           const SizedBox(height: 16),
 
-          // Receipt Section
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Receipt',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? AppColors.darkText : AppColors.lightText,
-                      ),
-                    ),
-                    if (entry.hasReceipt)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: entry.isReceiptValid
-                              ? AppColors.success.withOpacity(0.2)
-                              : AppColors.warning.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              entry.isReceiptValid ? Icons.check_circle : Icons.warning_amber_rounded,
-                              color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
-                              size: 12,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              entry.isReceiptValid ? 'Valid' : 'Invalid',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-              // Receipt Preview (if exists)
-              if (entry.hasReceipt)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  height: 60,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: entry.isReceiptValid ? AppColors.success : AppColors.warning,
-                      width: 1,
-                    ),
-                    image: DecorationImage(
-                      image: FileImage(File(entry.receiptImagePath!)),
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      Positioned(
-                        right: 4,
-                        top: 4,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white, size: 16),
-                            onPressed: () => _updateEntry(entry.id, receiptImagePath: null, isReceiptValid: false),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(maxWidth: 24, maxHeight: 24),
-                          ),
-                        ),
-                      ),
-                      if (isProcessing)
-                        const Positioned.fill(
-                          child: Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-
-              // Camera Button Row
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: _buildTextField(
-                      isDark: isDark,
-                      label: '',
-                      hint: 'Receipt tag (optional)',
-                      initialValue: entry.receiptTag,
-                      onChanged: (value) => _updateEntry(entry.id, receiptTag: value),
+                  Text(
+                    'Total',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: IconButton(
-                      icon: isProcessing
-                          ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                        ),
-                      )
-                          : const Icon(
-                        Icons.camera_alt_rounded,
-                        color: Colors.black,
-                        size: 24,
-                      ),
-                      onPressed: isProcessing ? null : () => _showCameraBottomSheet(context, isDark, entry.id),
+                  const SizedBox(height: 4),
+                  Text(
+                    currency.format(entry.totalCost),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? AppColors.darkText : AppColors.lightText,
                     ),
                   ),
                 ],
+              ),
+              ElevatedButton.icon(
+                onPressed: isProcessing ? null : () => _showCameraBottomSheet(context, isDark, entry.id),
+                icon: Icon(
+                  entry.hasReceipt && entry.isReceiptValid ? Icons.check_circle_rounded : Icons.camera_alt_rounded,
+                  color: Colors.black,
+                  size: 18,
+                ),
+                label: Text(
+                  entry.hasReceipt
+                      ? (entry.isReceiptValid ? 'Receipt verified' : 'Add receipt')
+                      : 'Add receipt',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: entry.hasReceipt && entry.isReceiptValid
+                      ? AppColors.success.withOpacity(0.9)
+                      : AppColors.primary,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
               ),
             ],
           ),
@@ -1286,17 +1429,17 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
             filled: true,
             fillColor: isDark ? AppColors.darkBackground : AppColors.lightBackground,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
+              borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide.none,
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
+              borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide(
                 color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
               ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
+              borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(
                 color: AppColors.primary,
                 width: 2,
@@ -1314,31 +1457,31 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
       color: Colors.transparent,
       child: InkWell(
         onTap: _addNewEntry,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
             border: Border.all(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 2,
+              color: AppColors.primary,
+              width: 1.5,
               style: BorderStyle.solid,
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                Icons.add_circle_rounded,
+                Icons.add_rounded,
                 color: AppColors.primary,
-                size: 24,
+                size: 22,
               ),
               const SizedBox(width: 8),
               Text(
-                'Add Material Item',
+                'Add item',
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                   color: AppColors.primary,
                 ),
               ),
@@ -1349,103 +1492,137 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     );
   }
 
-  Widget _buildFixedFooter(bool isDark, CurrencyProvider currency) {
+  Widget _buildSummaryCard(bool isDark, CurrencyProvider currency) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : Colors.white,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-          ),
+        color: isDark ? AppColors.darkCard : AppColors.lightSurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 0.5,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? AppColors.salamonoShadowDark : AppColors.salamonoShadow,
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
-        ],
       ),
-      child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
                   children: [
+                    Icon(
+                      Icons.receipt_long_rounded,
+                      size: 14,
+                      color: AppColors.primary,
+                    ),
+                    const SizedBox(width: 6),
                     Text(
-                      'TOTAL COST',
+                      'Summary',
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    Text(
-                      currency.format(_computedTotal),
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w700,
                         color: isDark ? AppColors.darkText : AppColors.lightText,
                       ),
                     ),
                   ],
                 ),
-                OutlinedButton.icon(
-                  onPressed: _computeTotal,
-                  icon: const Icon(Icons.calculate_rounded, size: 18),
-                  label: const Text('Compute Total'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: isDark ? AppColors.darkText : AppColors.lightText,
-                    side: const BorderSide(color: AppColors.primary, width: 2),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _submitEntries,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.black,
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  shadowColor: AppColors.primary.withOpacity(0.3),
-                ),
-                child: _isSubmitting
-                    ? const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
-                  ),
-                )
-                    : const Text(
-                  'Submit Entries',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+              ),
+              const Spacer(),
+              Text(
+                '${_entries.length} items',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Total cost',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
             ),
-          ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            currency.format(_totalCost),
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Icon(
+                Icons.check_circle_rounded,
+                size: 16,
+                color: AppColors.success,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_entries.where((e) => e.hasReceipt && e.isReceiptValid).length} receipts verified',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'The total is updated instantly while you fill each material row. Keep typing without losing focus.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.5,
+              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubmitBar(bool isDark) {
+    return SizedBox(
+      height: 64,
+      child: ElevatedButton(
+        onPressed: _isSubmitting ? null : _submitEntries,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.black,
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 16),
         ),
+        child: _isSubmitting
+            ? const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                ),
+              )
+            : const Text(
+                'Submit Entries',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
       ),
     );
   }

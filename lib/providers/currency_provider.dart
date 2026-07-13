@@ -1,5 +1,6 @@
 // lib/providers/currency_provider.dart
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
 import 'package:projectrack1/database/database.dart' as db;
 
@@ -59,10 +60,51 @@ class CurrencyProvider extends ChangeNotifier {
       final value = await _database!.getSetting(_settingsKey);
       if (value != null && value.isNotEmpty) {
         _currencyCode = value;
+      } else {
+        // No saved currency — try to infer from device locale (country code).
+        try {
+          final locale = ui.PlatformDispatcher.instance.locale;
+          final country = (locale.countryCode ?? '').toUpperCase();
+          final inferred = _mapCountryToCurrency(country);
+          _currencyCode = inferred;
+        } catch (_) {
+          _currencyCode = defaultCode;
+        }
       }
     } catch (_) {}
     _loaded = true;
     notifyListeners();
+  }
+
+  String _mapCountryToCurrency(String countryCode) {
+    // Map common country codes to currency codes. Fall back to defaultCode.
+    switch (countryCode) {
+      case 'US':
+        return 'USD';
+      case 'GB':
+      case 'UK':
+        return 'GBP';
+      case 'EU':
+      case 'FR':
+      case 'DE':
+      case 'ES':
+      case 'IT':
+        return 'EUR';
+      case 'JP':
+        return 'JPY';
+      case 'CA':
+        return 'CAD';
+      case 'KE':
+        return 'KES';
+      case 'NG':
+        return 'NGN';
+      case 'IN':
+        return 'INR';
+      case 'AU':
+        return 'AUD';
+      default:
+        return defaultCode;
+    }
   }
 
   Future<void> setCurrency(String code) async {

@@ -1068,16 +1068,40 @@ class _ProjectOverviewScreenState extends State<ProjectOverviewScreen>
               Expanded(
                 child: _buildActionButton(
                   isDark: isDark,
-                  icon: Icons.share_rounded,
+                  icon: Icons.task_alt_rounded,
                   color: AppColors.warning,
-                  label: 'Share',
-                  onTap: () {
-                    final p = _project;
-                    if (p == null) return;
-                    _showShareOptions(p);
-                  },
+                  label: 'Tasks',
+                  onTap: () => context.push(
+                    AppRoutes.projectTasks.replaceFirst(
+                      ':id',
+                      widget.projectId,
+                    ),
+                    extra: widget.projectName,
+                  ),
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  isDark: isDark,
+                  icon: Icons.inventory_2_outlined,
+                  color: AppColors.construction,
+                  label: 'Inventory',
+                  onTap: () => context.push(
+                    AppRoutes.projectInventory.replaceFirst(
+                      ':id',
+                      widget.projectId,
+                    ),
+                    extra: widget.projectName,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(child: SizedBox()),
             ],
           ),
         ],
@@ -1459,6 +1483,34 @@ class _ProjectOverviewScreenState extends State<ProjectOverviewScreen>
               onTap: () {
                 Navigator.pop(context);
                 _editProjectTags(project);
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.inventory_2_outlined,
+                color: AppColors.construction,
+              ),
+              title: const Text('Material Inventory'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push(
+                  AppRoutes.projectInventory.replaceFirst(':id', project.id),
+                  extra: project.name,
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.task_alt_rounded,
+                color: AppColors.warning,
+              ),
+              title: const Text('Manage Tasks'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push(
+                  AppRoutes.projectTasks.replaceFirst(':id', project.id),
+                  extra: project.name,
+                );
               },
             ),
             ListTile(

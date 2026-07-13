@@ -61,6 +61,7 @@ dependencies:
   csv: ^7.2.0
   pdf: ^3.11.1
   open_filex: ^4.7.0
+  bcrypt: ^1.2.0
 
 dev_dependencies:
   drift_dev: ^2.14.0

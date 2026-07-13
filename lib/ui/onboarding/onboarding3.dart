@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
+import '../../providers/currency_provider.dart';
 
 import '../../providers/theme_provider.dart';
 
@@ -28,6 +29,7 @@ class _OnboardingScreen3State extends State<OnboardingScreen3> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isDark = themeProvider.isDarkMode(context);
     final theme = Theme.of(context);
+    final currency = Provider.of<CurrencyProvider>(context);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -97,7 +99,7 @@ class _OnboardingScreen3State extends State<OnboardingScreen3> {
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: _buildIllustration(isDark),
+                      child: _buildIllustration(isDark, currency),
                     ),
 
                     const SizedBox(height: 32),
@@ -200,7 +202,7 @@ class _OnboardingScreen3State extends State<OnboardingScreen3> {
     );
   }
 
-  Widget _buildIllustration(bool isDark) {
+  Widget _buildIllustration(bool isDark, CurrencyProvider currency) {
     return AspectRatio(
       aspectRatio: 1,
       child: Container(
@@ -328,7 +330,7 @@ class _OnboardingScreen3State extends State<OnboardingScreen3> {
                     child: _buildChip(
                       isDark: isDark,
                       icon: Icons.payments_rounded,
-                      label: '\$124.50',
+                      label: currency.format(124.5),
                     ),
                   ),
                 ),

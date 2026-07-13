@@ -1,12 +1,11 @@
 // lib/providers/auth_provider.dart
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:projectrack1/database/database.dart' as db;
 import 'package:projectrack1/constants/models/user_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../service/auth_service.dart';
 import '../service/biometric_service.dart';
 import '../service/secure_storage_service.dart';
 
@@ -148,7 +147,12 @@ class AuthProvider extends ChangeNotifier {
       )..where((t) => t.email.equals(email))).getSingleOrNull();
 
       if (userData != null &&
-          _verifyPassword(password, userData.passwordHash)) {
+          AuthService.verifyPassword(password, userData.passwordHash)) {
+        await _migratePasswordHashIfNeeded(
+          userId: userData.id,
+          password: password,
+          storedHash: userData.passwordHash,
+        );
         _currentUser = User.fromDrift(userData);
         await _secureStorage.saveAuthToken(
           'session_${DateTime.now().millisecondsSinceEpoch}',
@@ -266,13 +270,13 @@ class AuthProvider extends ChangeNotifier {
         return false;
       }
 
-      // Create new user
+      // Create new user with bcrypt (per-user salt embedded in hash)
       final now = DateTime.now();
       final newUser = db.UsersCompanion.insert(
         id: 'user_${DateTime.now().millisecondsSinceEpoch}',
         name: name,
         email: email,
-        passwordHash: _hashPassword(password),
+        passwordHash: AuthService.hashPassword(password),
         createdAt: now,
         updatedAt: now,
       );
@@ -366,7 +370,7 @@ class AuthProvider extends ChangeNotifier {
         _database.users,
       )..where((t) => t.id.equals(_currentUser!.id))).getSingleOrNull();
       if (userRow == null ||
-          !_verifyPassword(oldPassword, userRow.passwordHash)) {
+          !AuthService.verifyPassword(oldPassword, userRow.passwordHash)) {
         setError('Current password is incorrect');
         setStatus(AuthStatus.authenticated);
         return false;
@@ -376,7 +380,7 @@ class AuthProvider extends ChangeNotifier {
         _database.users,
       )..where((t) => t.id.equals(_currentUser!.id))).write(
         db.UsersCompanion(
-          passwordHash: drift.Value(_hashPassword(newPassword)),
+          passwordHash: drift.Value(AuthService.hashPassword(newPassword)),
           updatedAt: drift.Value(DateTime.now()),
         ),
       );
@@ -438,21 +442,25 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Utility methods: SHA-256 with app salt (passwords never stored plain)
-  static const String _passwordSalt = 'projectrack_v1_salt';
-
-  String _hashPassword(String password) {
-    final bytes = utf8.encode('$_passwordSalt$password');
-    final digest = sha256.convert(bytes);
-    return digest.toString();
-  }
-
-  bool _verifyPassword(String plain, String storedHash) {
-    if (storedHash.isEmpty) return false;
-    // SHA-256 hex digest is 64 chars; legacy plain-text passwords are shorter
-    if (storedHash.length == 64) return _hashPassword(plain) == storedHash;
-    return plain ==
-        storedHash; // legacy plain-text (migrate on next password change)
+  /// Upgrade legacy SHA-256 hashes to bcrypt after a successful verify.
+  Future<void> _migratePasswordHashIfNeeded({
+    required String userId,
+    required String password,
+    required String storedHash,
+  }) async {
+    if (!AuthService.needsBcryptMigration(storedHash)) return;
+    try {
+      await (_database.update(
+        _database.users,
+      )..where((t) => t.id.equals(userId))).write(
+        db.UsersCompanion(
+          passwordHash: drift.Value(AuthService.hashPassword(password)),
+          updatedAt: drift.Value(DateTime.now()),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Password hash migration failed for $userId: $e');
+    }
   }
 
   void setStatus(AuthStatus newStatus) {

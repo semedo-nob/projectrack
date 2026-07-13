@@ -65,6 +65,21 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       ..sort();
   }
 
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'Planning':
+        return AppColors.warning;
+      case 'Active':
+        return AppColors.primary;
+      case 'On Hold':
+        return AppColors.error;
+      case 'Done':
+        return AppColors.success;
+      default:
+        return AppColors.primary;
+    }
+  }
+
   Future<void> _selectDate(BuildContext context, bool isStartDate) async {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     final isDark = themeProvider.isDarkMode(context);
@@ -189,87 +204,86 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
       backgroundColor: theme.scaffoldBackgroundColor,
       body: Stack(
         children: [
-          // Main Scrollable Content
           CustomScrollView(
             slivers: [
-              // Top App Bar
               SliverAppBar(
                 expandedHeight: 0,
                 floating: true,
                 pinned: true,
-                backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(
-                  0.9,
-                ),
+                backgroundColor: theme.appBarTheme.backgroundColor?.withOpacity(0.95),
                 elevation: 0,
-                leading: Container(
-                  margin: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isDark
-                        ? Colors.white.withOpacity(0.1)
-                        : Colors.black.withOpacity(0.05),
+                leading: IconButton(
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: theme.appBarTheme.foregroundColor ?? (isDark ? Colors.white : Colors.black),
+                    size: 24,
                   ),
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: theme.appBarTheme.foregroundColor,
-                      size: 28,
-                    ),
-                    onPressed: () => context.go(AppRoutes.home),
-                  ),
+                  onPressed: () => context.go(AppRoutes.home),
                 ),
                 title: Text(
-                  'New Project',
-                  style: theme.appBarTheme.titleTextStyle,
+                  'New project',
+                  style: theme.appBarTheme.titleTextStyle?.copyWith(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 centerTitle: true,
-                actions: [
-                  const SizedBox(width: 48), // Spacer for balance
-                ],
+                actions: const [SizedBox(width: 48)],
               ),
-
-              // Form Content
               SliverPadding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 0),
                 sliver: SliverToBoxAdapter(
                   child: Form(
                     key: _formKey,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Project Name Field
-                        _buildProjectNameField(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        // Description Field
-                        _buildDescriptionField(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        // Date Fields Grid
-                        _buildDateFields(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        // Budget Field
-                        _buildBudgetField(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        // Status Selector
-                        _buildStatusSelector(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        // Category Selector
-                        _buildCategoryField(isDark, theme),
-
-                        const SizedBox(height: 24),
-
-                        _buildTagField(isDark, theme),
-
-                        const SizedBox(height: 100), // Space for bottom button
+                        _buildLabel('Project name', null, isDark),
+                        const SizedBox(height: 8),
+                        _buildTextField(
+                          controller: _projectNameController,
+                          hintText: 'e.g. Q3 Marketing Campaign',
+                          isDark: isDark,
+                          validator: (value) {
+                            if (value == null || value.trim().isEmpty) {
+                              return 'Please enter a project name';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 20),
+                        _buildLabel('Description (optional)', 'Briefly describe the goals and requirements', isDark),
+                        const SizedBox(height: 8),
+                        _buildMultilineField(
+                          controller: _descriptionController,
+                          hintText: 'Write a short summary...',
+                          isDark: isDark,
+                        ),
+                        const SizedBox(height: 20),
+                        _buildDateFields(isDark),
+                        const SizedBox(height: 20),
+                        _buildLabel('Budget (optional)', null, isDark),
+                        const SizedBox(height: 8),
+                        _buildBudgetField(isDark),
+                        const SizedBox(height: 20),
+                        Divider(
+                          height: 1,
+                          thickness: 0.5,
+                          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                        ),
+                        const SizedBox(height: 20),
+                        _buildLabel('Status', null, isDark),
+                        const SizedBox(height: 8),
+                        _buildStatusSelector(isDark),
+                        const SizedBox(height: 20),
+                        _buildLabel('Category', null, isDark),
+                        const SizedBox(height: 8),
+                        _buildCategoryField(isDark),
+                        const SizedBox(height: 20),
+                        _buildLabel('Tags (comma-separated)', 'Add tags separated by commas', isDark),
+                        const SizedBox(height: 8),
+                        _buildTagsSection(isDark),
+                        const SizedBox(height: 130),
                       ],
                     ),
                   ),
@@ -277,8 +291,6 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
               ),
             ],
           ),
-
-          // Fixed Bottom Button
           Positioned(
             bottom: 0,
             left: 0,
@@ -290,274 +302,150 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
-  Widget _buildTagField(bool isDark, ThemeData theme) {
-    final previewTags = _parseTags();
+  Widget _buildLabel(String title, String? hint, bool isDark) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Tags',
-          style: theme.textTheme.titleMedium?.copyWith(
+          title.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11,
             fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
           ),
         ),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: _tagsController,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            hintText: 'client, urgent, interior',
-            helperText: 'Separate tags with commas',
-            prefixIcon: const Icon(Icons.sell_outlined),
-            filled: true,
-            fillColor: isDark ? AppColors.darkCard : Colors.white,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide.none,
+        if (hint != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            hint,
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
             ),
-          ),
-        ),
-        if (previewTags.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: previewTags
-                .map(
-                  (tag) => Chip(
-                    label: Text(tag),
-                    avatar: const Icon(Icons.tag, size: 16),
-                  ),
-                )
-                .toList(),
           ),
         ],
       ],
     );
   }
 
-  Widget _buildProjectNameField(bool isDark, ThemeData theme) {
-    return Focus(
-      onFocusChange: (hasFocus) {
-        // Optional: Add animation when focused
-      },
-      child: Builder(
-        builder: (context) {
-          final isFocused = Focus.of(context).hasFocus;
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 16, bottom: 8),
-                child: Text(
-                  'PROJECT NAME',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                    color: isDark
-                        ? AppColors.darkTextSecondary
-                        : AppColors.lightTextSecondary,
-                  ),
-                ),
-              ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                transform: Matrix4.identity()..scale(isFocused ? 1.01 : 1.0),
-                child: TextFormField(
-                  controller: _projectNameController,
-                  textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a project name';
-                    }
-                    return null;
-                  },
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: isDark ? AppColors.darkText : AppColors.lightText,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'e.g. Q3 Marketing Campaign',
-                    hintStyle: TextStyle(
-                      color: isDark
-                          ? AppColors.darkTextTertiary
-                          : AppColors.lightTextTertiary,
-                    ),
-                    suffixIcon: isFocused
-                        ? Icon(
-                            Icons.edit_rounded,
-                            color: AppColors.primary,
-                            size: 24,
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: isDark
-                        ? AppColors.darkCard
-                        : AppColors.lightBackground,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: isDark
-                            ? AppColors.darkBorder
-                            : AppColors.lightBorder,
-                        width: 1,
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.primary,
-                        width: 2,
-                      ),
-                    ),
-                    errorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.error,
-                        width: 1,
-                      ),
-                    ),
-                    focusedErrorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.error,
-                        width: 2,
-                      ),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 20,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hintText,
+    required bool isDark,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      validator: validator,
+      style: TextStyle(
+        fontSize: 16,
+        color: isDark ? AppColors.darkText : AppColors.lightText,
+      ),
+      decoration: InputDecoration(
+        hintText: hintText,
+        hintStyle: TextStyle(
+          color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+        ),
+        filled: true,
+        fillColor: isDark ? AppColors.darkCard : AppColors.lightBackground,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            width: 0.5,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            width: 0.5,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(
+            color: AppColors.primary,
+            width: 1.5,
+          ),
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
       ),
     );
   }
 
-  Widget _buildDescriptionField(bool isDark, ThemeData theme) {
-    return Focus(
-      onFocusChange: (hasFocus) {
-        // Optional: Add animation when focused
-      },
-      child: Builder(
-        builder: (context) {
-          final isFocused = Focus.of(context).hasFocus;
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 16, bottom: 8),
-                child: Text(
-                  'DESCRIPTION',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
-                    color: isDark
-                        ? AppColors.darkTextSecondary
-                        : AppColors.lightTextSecondary,
-                  ),
-                ),
-              ),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                transform: Matrix4.identity()..scale(isFocused ? 1.01 : 1.0),
-                child: TextFormField(
-                  controller: _descriptionController,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.newline,
-                  validator: (value) => null,
-                  style: TextStyle(
-                    fontSize: 16,
-                    height: 1.5,
-                    color: isDark ? AppColors.darkText : AppColors.lightText,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'Briefly describe the goals and requirements...',
-                    hintStyle: TextStyle(
-                      color: isDark
-                          ? AppColors.darkTextTertiary
-                          : AppColors.lightTextTertiary,
-                    ),
-                    filled: true,
-                    fillColor: isDark
-                        ? AppColors.darkCard
-                        : AppColors.lightBackground,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: isDark
-                            ? AppColors.darkBorder
-                            : AppColors.lightBorder,
-                        width: 1,
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.primary,
-                        width: 2,
-                      ),
-                    ),
-                    errorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.error,
-                        width: 1,
-                      ),
-                    ),
-                    focusedErrorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: AppColors.error,
-                        width: 2,
-                      ),
-                    ),
-                    contentPadding: const EdgeInsets.all(24),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+  Widget _buildMultilineField({
+    required TextEditingController controller,
+    required String hintText,
+    required bool isDark,
+  }) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 80),
+      child: TextFormField(
+        controller: controller,
+        minLines: 4,
+        maxLines: 6,
+        style: TextStyle(
+          fontSize: 15,
+          color: isDark ? AppColors.darkText : AppColors.lightText,
+        ),
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: TextStyle(
+            color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+          ),
+          filled: true,
+          fillColor: isDark ? AppColors.darkCard : AppColors.lightBackground,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              width: 0.5,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              width: 0.5,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(
+              color: AppColors.primary,
+              width: 1.5,
+            ),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 14,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildDateFields(bool isDark, ThemeData theme) {
+  Widget _buildDateFields(bool isDark) {
     return Row(
       children: [
-        // Start Date
         Expanded(
           child: _buildDateField(
             isDark: isDark,
-            label: 'START DATE',
+            label: 'Start date',
             date: _startDate,
             onTap: () => _selectDate(context, true),
           ),
         ),
-        const SizedBox(width: 16),
-
-        // End Date
+        const SizedBox(width: 12),
         Expanded(
           child: _buildDateField(
             isDark: isDark,
-            label: 'END DATE',
+            label: 'End date',
             date: _endDate,
             onTap: () => _selectDate(context, false),
           ),
@@ -575,31 +463,27 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 16, bottom: 8),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
-            ),
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+            color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
           ),
         ),
+        const SizedBox(height: 8),
         GestureDetector(
           onTap: onTap,
           child: Container(
             height: 56,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
               color: isDark ? AppColors.darkCard : AppColors.lightBackground,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-                width: 1,
+                width: 0.5,
               ),
             ),
             child: Row(
@@ -607,19 +491,15 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                 Icon(
                   Icons.calendar_today_rounded,
                   size: 18,
-                  color: isDark
-                      ? AppColors.darkTextTertiary
-                      : AppColors.lightTextTertiary,
+                  color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  date == null ? 'Select date' : _formatDate(date),
+                  date == null ? 'Select' : _formatDate(date),
                   style: TextStyle(
                     fontSize: 14,
                     color: date == null
-                        ? (isDark
-                              ? AppColors.darkTextTertiary
-                              : AppColors.lightTextTertiary)
+                        ? (isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary)
                         : (isDark ? AppColors.darkText : AppColors.lightText),
                   ),
                 ),
@@ -631,270 +511,258 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
     );
   }
 
-  Widget _buildBudgetField(bool isDark, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 16, bottom: 8),
-          child: Text(
-            'BUDGET (OPTIONAL)',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
-            ),
-          ),
+  Widget _buildBudgetField(bool isDark) {
+    return Container(
+      height: 56,
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : AppColors.lightBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+          width: 0.5,
         ),
-        Container(
-          height: 56,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkCard : AppColors.lightBackground,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  border: Border(
-                    right: BorderSide(
-                      color: isDark
-                          ? AppColors.darkBorder
-                          : AppColors.lightBorder,
-                    ),
-                  ),
-                ),
-                child: Center(
-                  child: Consumer<CurrencyProvider>(
-                    builder: (_, currency, _) => Text(
-                      currency.symbol,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: isDark
-                            ? AppColors.darkTextTertiary
-                            : AppColors.lightTextTertiary,
-                      ),
-                    ),
-                  ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              border: Border(
+                right: BorderSide(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  width: 0.5,
                 ),
               ),
-              Expanded(
-                child: TextFormField(
-                  controller: _budgetController,
-                  keyboardType: TextInputType.number,
+            ),
+            child: Center(
+              child: Consumer<CurrencyProvider>(
+                builder: (_, currency, __) => Text(
+                  currency.symbol,
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                     color: isDark ? AppColors.darkText : AppColors.lightText,
                   ),
-                  decoration: InputDecoration(
-                    hintText: '0.00',
-                    hintStyle: TextStyle(
-                      color: isDark
-                          ? AppColors.darkTextTertiary
-                          : AppColors.lightTextTertiary,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
                 ),
               ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatusSelector(bool isDark, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 16, bottom: 12),
-          child: Text(
-            'STATUS',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
             ),
           ),
-        ),
-        SizedBox(
-          height: 56,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _statusOptions.length,
-            separatorBuilder: (context, index) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final option = _statusOptions[index];
-              final isSelected = _selectedStatus == option['label'];
-
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedStatus = option['label'];
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors.primary
-                        : (isDark
-                              ? AppColors.darkCard
-                              : AppColors.lightBackground),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(
-                      color: isSelected
-                          ? Colors.transparent
-                          : (isDark
-                                ? AppColors.darkBorder
-                                : AppColors.lightBorder),
-                      width: 1,
-                    ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: AppColors.primary.withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        option['icon'],
-                        color: isSelected
-                            ? Colors.black
-                            : (isDark
-                                  ? AppColors.darkTextSecondary
-                                  : AppColors.lightTextSecondary),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        option['label'],
-                        style: TextStyle(
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.w500,
-                          color: isSelected
-                              ? Colors.black
-                              : (isDark
-                                    ? AppColors.darkText
-                                    : AppColors.lightText),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCategoryField(bool isDark, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 16, bottom: 8),
-          child: Text(
-            'CATEGORY',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-              color: isDark
-                  ? AppColors.darkTextSecondary
-                  : AppColors.lightTextSecondary,
-            ),
-          ),
-        ),
-        Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkCard : AppColors.lightBackground,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
-              width: 1,
-            ),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selectedCategory,
-              isExpanded: true,
-              icon: Icon(
-                Icons.arrow_drop_down_rounded,
-                color: theme.iconTheme.color,
-              ),
-              items: _categoryOptions
-                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) setState(() => _selectedCategory = v);
-              },
+          Expanded(
+            child: TextFormField(
+              controller: _budgetController,
+              keyboardType: TextInputType.number,
               style: TextStyle(
                 fontSize: 16,
                 color: isDark ? AppColors.darkText : AppColors.lightText,
               ),
+              decoration: InputDecoration(
+                hintText: '0.00',
+                hintStyle: TextStyle(
+                  color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+                ),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusSelector(bool isDark) {
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _statusOptions.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final option = _statusOptions[index];
+          final isSelected = _selectedStatus == option['label'];
+          final pillColor = _statusColor(option['label']);
+
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedStatus = option['label'];
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: isSelected ? pillColor : (isDark ? AppColors.darkCard : AppColors.lightBackground),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: isSelected ? Colors.transparent : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                  width: 0.5,
+                ),
+              ),
+              child: Text(
+                option['label'],
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? Colors.black : (isDark ? AppColors.darkText : AppColors.lightText),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategoryField(bool isDark) {
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 3.8,
+      children: _categoryOptions.map((category) {
+        final isSelected = _selectedCategory == category;
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedCategory = category;
+            });
+          },
+          child: Container(
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? (isDark ? AppColors.darkCard : Colors.white)
+                  : (isDark ? AppColors.darkBackground : AppColors.lightBackground),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: isSelected ? AppColors.primary : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                width: 0.5,
+              ),
+            ),
+            child: Text(
+              category,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: isSelected ? AppColors.primary : (isDark ? AppColors.darkText : AppColors.lightText),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildTagsSection(bool isDark) {
+    final previewTags = _parseTags();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _tagsController,
+          onChanged: (_) => setState(() {}),
+          style: TextStyle(
+            fontSize: 15,
+            color: isDark ? AppColors.darkText : AppColors.lightText,
+          ),
+          decoration: InputDecoration(
+            hintText: 'client, urgent, interior',
+            hintStyle: TextStyle(
+              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+            ),
+            filled: true,
+            fillColor: isDark ? AppColors.darkCard : AppColors.lightBackground,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                width: 0.5,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                width: 0.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                color: AppColors.primary,
+                width: 1.5,
+              ),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
             ),
           ),
         ),
+        if (previewTags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: previewTags.map((tag) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.darkCard : AppColors.lightBackground,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    width: 0.5,
+                  ),
+                ),
+                child: Text(
+                  tag,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? AppColors.darkText : AppColors.lightText,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ],
     );
   }
 
   Widget _buildBottomButton(bool isDark, ThemeData theme) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            (isDark ? AppColors.darkBackground : AppColors.lightBackground)
-                .withOpacity(0),
+            (isDark ? AppColors.darkBackground : AppColors.lightBackground).withOpacity(0),
             isDark ? AppColors.darkBackground : AppColors.lightBackground,
           ],
         ),
       ),
       child: SafeArea(
+        top: false,
         child: SizedBox(
           width: double.infinity,
-          height: 64,
+          height: 56,
           child: ElevatedButton(
             onPressed: _isLoading ? null : _handleCreateProject,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.black,
-              elevation: 4,
+              elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              shadowColor: AppColors.primary.withOpacity(0.3),
             ),
             child: _isLoading
                 ? const SizedBox(
@@ -905,19 +773,12 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
                     ),
                   )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.save_rounded),
-                      SizedBox(width: 12),
-                      Text(
-                        'Create Project',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
+                : const Text(
+                    'Create project',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
           ),
         ),

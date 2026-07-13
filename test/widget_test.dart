@@ -1,30 +1,16 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:projectrack1/main.dart';
+import 'package:projectrack1/themes/app_colors.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
-
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('AppColors Modern Industrial Violet brand color validation', () {
+    expect(AppColors.primary, const Color(0xFF5E4EE3));
+    expect(AppColors.primaryLight, const Color(0xFF7B6EF6));
+    expect(AppColors.primaryDark, const Color(0xFF4338B5));
+    expect(AppColors.accent, const Color(0xFF8B7CF6));
+    expect(AppColors.success, const Color(0xFF2F855A));
+    expect(AppColors.warning, const Color(0xFFD69E2E));
+    expect(AppColors.error, const Color(0xFFC53030));
+    expect(AppColors.info, const Color(0xFF2B6CB0));
   });
 }

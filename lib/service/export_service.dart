@@ -220,7 +220,8 @@ class ExportService {
     required String currencyLabel,
   }) async {
     final pdf = pw.Document();
-    final currency = currencyLabel.trim().isEmpty ? '\$' : currencyLabel;
+    // Default to Kenyan Shilling symbol when no currencyLabel provided.
+    final currency = currencyLabel.trim().isEmpty ? 'KSh' : currencyLabel;
     final dateFmt = DateFormat('yyyy-MM-dd');
 
     pdf.addPage(
