@@ -406,8 +406,23 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   icon: Icons.calendar_today_rounded,
                   iconColor: isDark ? AppColors.darkText : AppColors.lightText,
                   iconBgColor: isDark ? AppColors.darkSurface : Colors.grey.shade100,
-                  title: DateFormat('MMMM d, yyyy').format(expense.date),
-                  subtitle: 'Transaction Date',
+                  title: DateFormat(
+                    (expense.date.hour != 0 ||
+                            expense.date.minute != 0 ||
+                            expense.date.second != 0)
+                        ? 'MMMM d, yyyy · h:mm a'
+                        : 'MMMM d, yyyy',
+                  ).format(expense.date),
+                  subtitle: 'Receipt date & time',
+                ),
+
+                _buildDetailItem(
+                  isDark: isDark,
+                  icon: Icons.schedule_rounded,
+                  iconColor: isDark ? AppColors.darkText : AppColors.lightText,
+                  iconBgColor: isDark ? AppColors.darkSurface : Colors.grey.shade100,
+                  title: DateFormat('MMMM d, yyyy · h:mm a').format(expense.createdAt),
+                  subtitle: 'Logged into system',
                 ),
 
                 // Category

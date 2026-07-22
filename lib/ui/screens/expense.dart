@@ -39,10 +39,36 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
   bool _loading = true;
   String? _selectedCategoryFilter;
   String? _selectedDateFilter;
+  String? _selectedStatusFilter;
+  String _sortMode = 'newest';
 
   // Filter options
-  final List<String> _categoryFilters = ['All', 'Materials', 'Labor', 'Equipment', 'Travel', 'Other'];
-  final List<String> _dateFilters = ['All', 'Today', 'Yesterday', 'This Week', 'This Month', 'Last Month'];
+  final List<String> _categoryFilters = [
+    'All',
+    'Materials',
+    'Labor',
+    'Equipment',
+    'Travel',
+    'Receipt',
+    'Supplies',
+    'Other',
+  ];
+  final List<String> _dateFilters = [
+    'All',
+    'Today',
+    'Yesterday',
+    'This Week',
+    'This Month',
+    'Last Month',
+  ];
+  final List<String> _statusFilters = [
+    'All',
+    'Logged',
+    'Verified',
+    'Pending',
+    'Needs Review',
+    'Missing Receipt',
+  ];
 
   @override
   void initState() {
@@ -140,8 +166,9 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
             'status': e.status,
             'statusColor': e.status.color,
             'statusIcon': e.status.icon,
-            'date': DateFormat('MMM d, yyyy').format(e.date),
+            'date': e.formattedDate,
             'dateTime': e.date,
+            'loggedAt': DateFormat('MMM d, yyyy h:mm a').format(e.createdAt),
             'amount': e.amount,
             'type': e.category.displayName,
             'categoryColor': e.category.color,
@@ -187,11 +214,12 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
   }
 
   List<Map<String, dynamic>> get _filteredCategories {
-    if (_searchQuery.isEmpty && _selectedCategoryFilter == null && _selectedDateFilter == null) {
-      return _categories;
-    }
+    final hasFilters = _searchQuery.isNotEmpty ||
+        (_selectedCategoryFilter != null && _selectedCategoryFilter != 'All') ||
+        (_selectedDateFilter != null && _selectedDateFilter != 'All') ||
+        (_selectedStatusFilter != null && _selectedStatusFilter != 'All');
 
-    return _categories.map((category) {
+    var result = _categories.map((category) {
       final filteredItems = (category['items'] as List).where((item) {
         final expense = item['expense'] as Expense;
         final matchesSearch = _searchQuery.isEmpty ||
@@ -201,23 +229,56 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
 
         final matchesCategory = _selectedCategoryFilter == null ||
             _selectedCategoryFilter == 'All' ||
-            expense.category.displayName.contains(_selectedCategoryFilter!);
+            expense.category.displayName
+                .toLowerCase()
+                .contains(_selectedCategoryFilter!.toLowerCase());
 
         final matchesDate = _selectedDateFilter == null ||
             _selectedDateFilter == 'All' ||
             _matchesDateFilter(expense.date, _selectedDateFilter!);
 
-        return matchesSearch && matchesCategory && matchesDate;
+        final matchesStatus = _selectedStatusFilter == null ||
+            _selectedStatusFilter == 'All' ||
+            expense.status.displayName == _selectedStatusFilter;
+
+        return matchesSearch && matchesCategory && matchesDate && matchesStatus;
       }).toList();
 
       if (filteredItems.isEmpty) return null;
 
+      final sorted = List<Map<String, dynamic>>.from(filteredItems);
+      sorted.sort((a, b) {
+        final aDate = a['dateTime'] as DateTime;
+        final bDate = b['dateTime'] as DateTime;
+        if (_sortMode == 'oldest') return aDate.compareTo(bDate);
+        if (_sortMode == 'amount_high') {
+          return (b['amount'] as double).compareTo(a['amount'] as double);
+        }
+        if (_sortMode == 'amount_low') {
+          return (a['amount'] as double).compareTo(b['amount'] as double);
+        }
+        return bDate.compareTo(aDate);
+      });
+
       return {
         ...category,
-        'items': filteredItems,
-        'itemCount': filteredItems.length,
+        'items': sorted,
+        'itemCount': sorted.length,
       };
     }).whereType<Map<String, dynamic>>().toList();
+
+    if (!hasFilters && _sortMode == 'newest') {
+      // Keep merchant grouping order by newest item inside each group.
+      result.sort((a, b) {
+        final aItems = a['items'] as List;
+        final bItems = b['items'] as List;
+        if (aItems.isEmpty || bItems.isEmpty) return 0;
+        return (bItems.first['dateTime'] as DateTime)
+            .compareTo(aItems.first['dateTime'] as DateTime);
+      });
+    }
+
+    return result;
   }
 
   bool _matchesDateFilter(DateTime date, String filter) {
@@ -715,10 +776,23 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
                   ),
                   color: isDark ? AppColors.darkSurface : Colors.white,
                   onSelected: (value) {
+                    if (value == 'clear') {
+                      setState(() {
+                        _selectedCategoryFilter = null;
+                        _selectedDateFilter = null;
+                        _selectedStatusFilter = null;
+                        _sortMode = 'newest';
+                      });
+                      return;
+                    }
                     if (value.startsWith('category:')) {
                       setState(() => _selectedCategoryFilter = value.substring(9));
                     } else if (value.startsWith('date:')) {
                       setState(() => _selectedDateFilter = value.substring(5));
+                    } else if (value.startsWith('status:')) {
+                      setState(() => _selectedStatusFilter = value.substring(7));
+                    } else if (value.startsWith('sort:')) {
+                      setState(() => _sortMode = value.substring(5));
                     }
                   },
                   itemBuilder: (context) => [
@@ -731,6 +805,25 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
                       child: Row(
                         children: [
                           if (_selectedCategoryFilter == filter)
+                            Icon(Icons.check, size: 16, color: AppColors.primary),
+                          const SizedBox(width: 24),
+                          Text(filter),
+                        ],
+                      ),
+                    )),
+                    const PopupMenuItem(
+                      enabled: false,
+                      child: Divider(),
+                    ),
+                    const PopupMenuItem(
+                      enabled: false,
+                      child: Text('STATUS FILTER', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                    ..._statusFilters.map((filter) => PopupMenuItem(
+                      value: 'status:$filter',
+                      child: Row(
+                        children: [
+                          if (_selectedStatusFilter == filter)
                             Icon(Icons.check, size: 16, color: AppColors.primary),
                           const SizedBox(width: 24),
                           Text(filter),
@@ -756,6 +849,30 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
                         ],
                       ),
                     )),
+                    const PopupMenuItem(
+                      enabled: false,
+                      child: Divider(),
+                    ),
+                    const PopupMenuItem(
+                      enabled: false,
+                      child: Text('SORT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                    PopupMenuItem(
+                      value: 'sort:newest',
+                      child: Text(_sortMode == 'newest' ? '✓ Newest first' : 'Newest first'),
+                    ),
+                    PopupMenuItem(
+                      value: 'sort:oldest',
+                      child: Text(_sortMode == 'oldest' ? '✓ Oldest first' : 'Oldest first'),
+                    ),
+                    PopupMenuItem(
+                      value: 'sort:amount_high',
+                      child: Text(_sortMode == 'amount_high' ? '✓ Amount high → low' : 'Amount high → low'),
+                    ),
+                    PopupMenuItem(
+                      value: 'sort:amount_low',
+                      child: Text(_sortMode == 'amount_low' ? '✓ Amount low → high' : 'Amount low → high'),
+                    ),
                     const PopupMenuItem(
                       enabled: false,
                       child: Divider(),
@@ -865,6 +982,8 @@ class _CategorizedExpensesScreenState extends State<CategorizedExpensesScreen> {
                               setState(() {
                                 _selectedCategoryFilter = null;
                                 _selectedDateFilter = null;
+                                _selectedStatusFilter = null;
+                                _sortMode = 'newest';
                               });
                             },
                             icon: const Icon(Icons.clear_all_rounded),

@@ -16,6 +16,8 @@ import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../service/expense_duplicate_service.dart';
+import '../../constants/models/task_model.dart';
 import '../widgets/enterprise_ui.dart';
 
 class ReportsAnalyticsScreen extends StatefulWidget {
@@ -52,6 +54,11 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
   int _taskActive = 0;
   int _taskTodo = 0;
   int _taskTotal = 0;
+  int _taskOverdue = 0;
+  int _missingReceiptCount = 0;
+  int _pendingReviewCount = 0;
+  int _repeatPurchaseGroups = 0;
+  int _repeatPurchaseCount = 0;
 
   // Category data (period-filtered)
   List<Map<String, dynamic>> _categoryBreakdown = [];
@@ -682,7 +689,10 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
     final s = status.trim().toLowerCase();
     if (s == 'done') {
       onDone();
-    } else if (s.contains('todo') || s.contains('not started') || s.isEmpty) {
+    } else if (s.contains('todo') ||
+        s.contains('not started') ||
+        s == 'pending' ||
+        s.isEmpty) {
       onTodo();
     } else {
       onActive();
@@ -727,8 +737,12 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
       var taskActive = 0;
       var taskTodo = 0;
       var taskTotal = 0;
+      var taskOverdue = 0;
+      var missingReceipts = 0;
+      var pendingReview = 0;
       var periodSpent = 0.0;
       var expenseCount = 0;
+      final periodExpensesForDupes = <Expense>[];
 
       final totalDays = rangeEnd.difference(rangeStart).inDays + 1;
       final bucketCount = _lineChartBucketCount(totalDays);
@@ -774,6 +788,9 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
 
           periodSpent += e.amount;
           expenseCount++;
+          periodExpensesForDupes.add(e);
+          if (!e.hasReceipt) missingReceipts++;
+          if (e.status == ExpenseStatus.pendingReview) pendingReview++;
 
           final cat = e.category.displayName;
           categoryTotals[cat] = (categoryTotals[cat] ?? 0) + e.amount;
@@ -812,14 +829,30 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
         final tasks = await db.getTasksByProject(id);
         for (final t in tasks) {
           taskTotal++;
-          _classifyTask(
-            t.status,
-            () => taskDone++,
-            () => taskTodo++,
-            () => taskActive++,
-          );
+          final status = TaskStatus.fromString(t.status);
+          if (status == TaskStatus.done) {
+            taskDone++;
+          } else if (status == TaskStatus.pending) {
+            taskTodo++;
+          } else {
+            taskActive++;
+          }
+          final due = t.dueDate;
+          if (due != null && status != TaskStatus.done) {
+            final dueDay = DateTime(due.year, due.month, due.day);
+            final today = DateTime.now();
+            final todayDay = DateTime(today.year, today.month, today.day);
+            if (dueDay.isBefore(todayDay)) taskOverdue++;
+          }
         }
       }
+
+      final duplicateGroups =
+          const ExpenseDuplicateService().findRepeatGroups(periodExpensesForDupes);
+      final repeatPurchaseCount = duplicateGroups.fold<int>(
+        0,
+        (sum, group) => sum + group.length,
+      );
 
       _periodSpent = periodSpent;
       _expenseCountInPeriod = expenseCount;
@@ -827,6 +860,11 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
       _taskDone = taskDone;
       _taskActive = taskActive;
       _taskTodo = taskTodo;
+      _taskOverdue = taskOverdue;
+      _missingReceiptCount = missingReceipts;
+      _pendingReviewCount = pendingReview;
+      _repeatPurchaseGroups = duplicateGroups.length;
+      _repeatPurchaseCount = repeatPurchaseCount;
 
       // Top materials by total spend in period
       final materialTotals = <String, double>{};
@@ -1012,10 +1050,8 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
 
                             const SizedBox(height: 24),
 
-                            // Insights Alert (show only if relevant)
-                            if (_totalBudget > 0 &&
-                                _remaining < _totalBudget * 0.2)
-                              _buildInsightsAlert(isDark),
+                            // Insights panel
+                            _buildInsightsPanel(isDark),
 
                             const SizedBox(height: 32),
                           ],
@@ -1234,6 +1270,7 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
                 trendColor: AppColors.success,
                 trendValue: _taskTotal > 0
                     ? '$_taskDone done · $_taskActive active'
+                        '${_taskOverdue > 0 ? ' · $_taskOverdue overdue' : ''}'
                     : 'No tasks',
               );
               break;
@@ -2882,60 +2919,170 @@ class _ReportsAnalyticsScreenState extends State<ReportsAnalyticsScreen>
     );
   }
 
-  Widget _buildInsightsAlert(bool isDark) {
+  Widget _buildInsightsPanel(bool isDark) {
+    final cards = <Widget>[];
+
+    if (_totalBudget > 0 && _remaining < _totalBudget * 0.2) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.warning,
+          icon: Icons.warning_amber_rounded,
+          title: 'Budget alert',
+          body:
+              "You've used ${(_allTimeSpent / _totalBudget * 100).round()}% of allocated budget. Review remaining spend.",
+        ),
+      );
+    }
+
+    if (_missingReceiptCount > 0) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.error,
+          icon: Icons.receipt_long_rounded,
+          title: 'Missing receipts',
+          body:
+              '$_missingReceiptCount expense${_missingReceiptCount == 1 ? '' : 's'} in this period have no receipt attached.',
+        ),
+      );
+    }
+
+    if (_pendingReviewCount > 0) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.warning,
+          icon: Icons.rate_review_rounded,
+          title: 'Needs review',
+          body:
+              '$_pendingReviewCount receipt${_pendingReviewCount == 1 ? '' : 's'} were saved with low OCR confidence and need review.',
+        ),
+      );
+    }
+
+    if (_repeatPurchaseGroups > 0) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.info,
+          icon: Icons.copy_all_rounded,
+          title: 'Repeat / near-duplicate purchases',
+          body:
+              '$_repeatPurchaseGroups group${_repeatPurchaseGroups == 1 ? '' : 's'} '
+              '($_repeatPurchaseCount items) look almost identical — same merchant, amount, and date.',
+        ),
+      );
+    }
+
+    if (_taskOverdue > 0) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.error,
+          icon: Icons.event_busy_rounded,
+          title: 'Overdue tasks',
+          body:
+              '$_taskOverdue task${_taskOverdue == 1 ? '' : 's'} are past due and still open.',
+        ),
+      );
+    }
+
+    if (cards.isEmpty) {
+      cards.add(
+        _insightCard(
+          isDark: isDark,
+          color: AppColors.success,
+          icon: Icons.verified_rounded,
+          title: 'Looking healthy',
+          body:
+              'No budget, receipt, duplicate, or overdue-task alerts for this period.',
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.warning.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.warning.withOpacity(0.3)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.warning_amber_rounded,
-                color: AppColors.warning,
-                size: 20,
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Insights',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Budget Alert',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.warning,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'You\'ve used ${(_allTimeSpent / _totalBudget * 100).round()}% of your total budget. Consider reviewing expenses.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark
-                          ? AppColors.darkTextSecondary
-                          : AppColors.lightTextSecondary,
-                    ),
-                  ),
-                ],
-              ),
+          ),
+          const SizedBox(height: 12),
+          ...cards.map(
+            (c) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: c,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+  }
+
+  Widget _insightCard({
+    required bool isDark,
+    required Color color,
+    required IconData icon,
+    required String title,
+    required String body,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInsightsAlert(bool isDark) {
+    return _buildInsightsPanel(isDark);
   }
 
   void _showShareOptions() {

@@ -232,6 +232,35 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
+                if (task.status != TaskStatus.done)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        if (task.status == TaskStatus.pending)
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: () =>
+                                  _setStatus(TaskStatus.inProgress),
+                              icon: const Icon(Icons.play_arrow_rounded),
+                              label: const Text('Start'),
+                            ),
+                          ),
+                        if (task.status == TaskStatus.pending)
+                          const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: () => _setStatus(TaskStatus.done),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.success,
+                            ),
+                            icon: const Icon(Icons.check_rounded),
+                            label: const Text('Mark done'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 EnterpriseUi.sectionLabel('Update status', isDark),
                 Wrap(
                   spacing: 8,

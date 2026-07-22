@@ -553,12 +553,22 @@ final GoRouter router = GoRouter(
           projectId = extra['projectId'] as String?;
           projectName = extra['projectName'] as String?;
         }
+        final expenseId = extra is Map<String, dynamic> ? extra['expenseId'] as String? : null;
+        final merchant = extra is Map<String, dynamic> ? extra['merchant'] as String? : null;
+        final amount = extra is Map<String, dynamic> ? extra['amount'] as double? : null;
+        final date = extra is Map<String, dynamic> ? extra['date'] as String? : null;
+        final notes = extra is Map<String, dynamic> ? extra['notes'] as String? : null;
         return CustomTransitionPage(
           child: ReceiptOcrScreen(
             initialImagePath: imagePath,
             initialProjectId: projectId,
             projectId: projectId,
             projectName: projectName,
+            expenseId: expenseId,
+            initialMerchant: merchant,
+            initialAmount: amount,
+            initialDate: date,
+            initialNotes: notes,
           ),
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             const begin = Offset(1.0, 0.0);

@@ -37,23 +37,8 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
 
   // Available projects for filtering
   List<String> _availableProjects = [];
-
-  // Month options
-  final List<String> _monthOptions = [
-    'All',
-    'Jan 2024',
-    'Feb 2024',
-    'Mar 2024',
-    'Apr 2024',
-    'May 2024',
-    'Jun 2024',
-    'Jul 2024',
-    'Aug 2024',
-    'Sep 2024',
-    'Oct 2024',
-    'Nov 2024',
-    'Dec 2024',
-  ];
+  Map<String, String> _projectNames = {};
+  List<String> _monthOptions = ['All'];
 
   @override
   void initState() {
@@ -83,11 +68,22 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
 
       // Extract unique projects for filter
       final projects = receiptExpenses.map((e) => e.projectId).toSet().toList();
+      final allProjects = await db.getAllProjects();
+      final projectNames = {
+        for (final project in allProjects) project.id: project.name,
+      };
+      final monthOptions = _buildMonthOptions(receiptExpenses);
 
       if (mounted) {
         setState(() {
           _receipts = receiptExpenses;
           _availableProjects = projects;
+          _projectNames = projectNames;
+          _monthOptions = monthOptions;
+          if (_selectedMonthFilter != null &&
+              !_monthOptions.contains(_selectedMonthFilter)) {
+            _selectedMonthFilter = null;
+          }
           _isLoading = false;
         });
       }
@@ -99,6 +95,19 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
         });
       }
     }
+  }
+
+  List<String> _buildMonthOptions(List<Expense> receipts) {
+    final months = receipts
+        .map((receipt) => DateFormat('MMM yyyy').format(receipt.date))
+        .toSet()
+        .toList()
+      ..sort((a, b) {
+        final aDate = DateFormat('MMM yyyy').parse(a);
+        final bDate = DateFormat('MMM yyyy').parse(b);
+        return bDate.compareTo(aDate);
+      });
+    return ['All', ...months];
   }
 
   List<Expense> get _filteredReceipts {
@@ -427,9 +436,8 @@ class _ReceiptGalleryScreenState extends State<ReceiptGalleryScreen> {
               },
             ),
             ..._availableProjects.map((projectId) {
-              // TODO: Get project names from database
               return ListTile(
-                title: Text('Project $projectId'),
+                title: Text(_projectNames[projectId] ?? 'Project $projectId'),
                 onTap: () {
                   setState(() {
                     _selectedProjectFilter = projectId;
