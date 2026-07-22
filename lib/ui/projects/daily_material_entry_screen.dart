@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -20,6 +21,7 @@ import '../../routes/app_routes.dart';
 import '../../service/display_unit_prefs.dart';
 import '../../service/inventory_service.dart';
 import '../../service/smart_unit_suggestion_service.dart';
+import '../../service/receipt_validation_service.dart';
 import '../../service/unit_service.dart';
 
 class MaterialEntry {
@@ -126,33 +128,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   List<_MaterialTemplate> _templates = [];
 
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-
-  // Receipt validation keywords
-  final List<String> _receiptKeywords = [
-    'receipt', 'invoice', 'bill', 'purchase', 'sale', 'payment',
-    'total', 'amount', 'subtotal', 'tax', 'cash', 'change',
-    'thank you', 'store', 'merchant', 'customer', 'order',
-    'transaction', 'card', 'visa', 'mastercard', 'amex',
-    'cashier', 'register', 'terminal', 'authorization'
-  ];
-
-  final List<String> _rejectionKeywords = [
-    'selfie', 'profile', 'avatar', 'photo of me', 'my picture',
-    'screenshot', 'screen capture', 'instagram', 'facebook',
-    'whatsapp', 'snapchat', 'memes', 'funny', 'wallpaper'
-  ];
-
-  final List<RegExp> _receiptDatePatterns = [
-    RegExp(r'date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-    RegExp(r'transaction\s+date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-    RegExp(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-  ];
-
-  final List<RegExp> _receiptAmountPatterns = [
-    RegExp(r'total:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-    RegExp(r'amount:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-    RegExp(r'balance due:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-  ];
+  static const _validationService = ReceiptValidationService();
 
   @override
   void initState() {
@@ -410,65 +386,8 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     }
   }
 
-  bool _validateReceipt(String text) {
-    final lowerText = text.toLowerCase();
-
-    // Check for rejection keywords (if any match, reject immediately)
-    for (final keyword in _rejectionKeywords) {
-      if (lowerText.contains(keyword)) {
-        return false;
-      }
-    }
-
-    // Check for receipt keywords (at least 2 should match)
-    int receiptKeywordCount = 0;
-    for (final keyword in _receiptKeywords) {
-      if (lowerText.contains(keyword)) {
-        receiptKeywordCount++;
-      }
-    }
-
-    // Check for date patterns
-    bool hasDate = false;
-    for (final pattern in _receiptDatePatterns) {
-      if (pattern.hasMatch(text)) {
-        hasDate = true;
-        break;
-      }
-    }
-
-    // Check for amount patterns
-    bool hasAmount = false;
-    for (final pattern in _receiptAmountPatterns) {
-      if (pattern.hasMatch(text)) {
-        hasAmount = true;
-        break;
-      }
-    }
-
-    // Check for numbers (receipts have many numbers)
-    final numbers = RegExp(r'\d+').allMatches(text).length;
-    bool hasNumbers = numbers > 5;
-
-    // Check for currency symbols
-    bool hasCurrency = text.contains(RegExp(r'[\$\€\£]'));
-
-    // Check for multiple lines
-    final lines = text.split('\n').where((l) => l.trim().isNotEmpty).length;
-    bool hasMultipleLines = lines > 3;
-
-    // Overall validation: must have at least 3 of these conditions
-    int validConditions = [
-      receiptKeywordCount >= 2,
-      hasDate,
-      hasAmount,
-      hasNumbers,
-      hasCurrency,
-      hasMultipleLines,
-    ].where((v) => v).length;
-
-    return validConditions >= 3;
-  }
+  bool _isReceiptAcceptable(ReceiptValidationResult result) =>
+      result.isValid || result.allowManualOverride;
 
   Future<void> _processReceiptImage(File imageFile, String entryId) async {
     setState(() {
@@ -480,36 +399,31 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
       final recognizedText = await _textRecognizer.processImage(inputImage);
       final text = recognizedText.text;
 
-      final isValid = _validateReceipt(text);
+      final result = _validationService.validate(text);
+      final isValid = _isReceiptAcceptable(result);
 
       if (!mounted) return;
 
       if (isValid) {
-        // Try to extract merchant name from receipt
-        String? extractedMerchant;
-        final lines = text.split('\n');
-        if (lines.isNotEmpty) {
-          String firstLine = lines.first.trim();
-          if (firstLine.length < 50 && !firstLine.contains(RegExp(r'\d'))) {
-            extractedMerchant = firstLine;
-          }
-        }
-
-        if (extractedMerchant != null && extractedMerchant.isNotEmpty) {
-          _updateEntry(entryId, merchant: extractedMerchant);
+        final parsed = result.parsed;
+        if (parsed.merchant != null && parsed.merchant!.isNotEmpty) {
+          _updateEntry(entryId, merchant: parsed.merchant!);
         }
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Valid receipt detected!'),
-            backgroundColor: AppColors.success,
+            content: Text(_validationService.tierMessage(result.tier)),
+            backgroundColor: result.isValid ? AppColors.success : AppColors.warning,
             behavior: SnackBarBehavior.floating,
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('This does not appear to be a valid receipt. Please try again.'),
+            content: Text(
+              result.rejectionReason ??
+                  'This does not appear to be a valid receipt. Please try again.',
+            ),
             backgroundColor: AppColors.warning,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 3),
@@ -544,12 +458,15 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     }
 
     try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: source,
-        imageQuality: 85,
-        maxWidth: 1200,
-        maxHeight: 1600,
+      final XFile? image = await auth.runWithoutBiometricLock(
+        () => picker.pickImage(
+          source: source,
+          imageQuality: 85,
+          maxWidth: 1200,
+          maxHeight: 1600,
+        ),
       );
 
       if (image == null) return;
@@ -742,7 +659,10 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     if (entriesWithInvalidReceipt.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${entriesWithInvalidReceipt.length} receipt(s) are not valid. Please check or remove them.'),
+          content: Text(
+            '${entriesWithInvalidReceipt.length} receipt(s) could not be verified. '
+            'Remove them or attach clearer receipt photos.',
+          ),
           backgroundColor: AppColors.warning,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 3),

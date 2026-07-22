@@ -29,6 +29,10 @@ class AuthProvider extends ChangeNotifier {
   bool _needsBiometricUnlock = false;
   bool _hasStoredBiometricAccount = false;
   String? _lastBiometricEmail;
+  /// Camera/gallery and system biometric sheets background the app; skip
+  /// resume-lock while those activities are in flight (and briefly after).
+  int _biometricLockSuppressCount = 0;
+  DateTime? _biometricLockGraceUntil;
 
   AuthProvider({required db.AppDatabase database}) : _database = database {
     _init();
@@ -44,6 +48,28 @@ class AuthProvider extends ChangeNotifier {
   bool get needsBiometricUnlock => _needsBiometricUnlock;
   bool get hasStoredBiometricAccount => _hasStoredBiometricAccount;
   String? get lastBiometricEmail => _lastBiometricEmail;
+
+  /// True while camera/gallery/biometric UI is open, or in a short grace window.
+  bool get shouldSuppressBiometricLock {
+    if (_biometricLockSuppressCount > 0) return true;
+    final until = _biometricLockGraceUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  /// Run [action] without treating app backgrounding as a lock trigger.
+  /// Use around camera/gallery picks and system biometric prompts.
+  Future<T> runWithoutBiometricLock<T>(Future<T> Function() action) async {
+    _biometricLockSuppressCount++;
+    try {
+      return await action();
+    } finally {
+      _biometricLockSuppressCount =
+          (_biometricLockSuppressCount - 1).clamp(0, 1 << 30);
+      // Cover the brief resumed race after the picker/sheet closes.
+      _biometricLockGraceUntil =
+          DateTime.now().add(const Duration(seconds: 2));
+    }
+  }
 
   Future<void> _init() async {
     await _checkBiometricAvailability();
@@ -181,6 +207,10 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<bool> loginWithBiometrics() async {
+    return runWithoutBiometricLock(() => _loginWithBiometricsInternal());
+  }
+
+  Future<bool> _loginWithBiometricsInternal() async {
     if (!_isBiometricAvailable) {
       setError(
         _biometricService.lastError ??
@@ -404,7 +434,9 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
     if (enabled) {
-      final verified = await _biometricService.authenticate();
+      final verified = await runWithoutBiometricLock(
+        () => _biometricService.authenticate(),
+      );
       if (!verified) {
         setError(
           _biometricService.lastError ??
@@ -425,12 +457,14 @@ class AuthProvider extends ChangeNotifier {
       _hasStoredBiometricAccount = false;
       _lastBiometricEmail = null;
     }
-    _needsBiometricUnlock = enabled && _currentUser != null;
+    // User just verified (or disabled); do not force lock screen immediately.
+    _needsBiometricUnlock = false;
     notifyListeners();
     return true;
   }
 
   Future<void> requireBiometricUnlock() async {
+    if (shouldSuppressBiometricLock) return;
     if (_biometricEnabled && _currentUser != null && _isBiometricAvailable) {
       _needsBiometricUnlock = true;
       notifyListeners();

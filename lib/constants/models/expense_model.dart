@@ -10,7 +10,8 @@ enum ExpenseStatus {
   verified,
   rejected,
   missing,
-  logged;
+  logged,
+  pendingReview;
 
   String get displayName {
     switch (this) {
@@ -24,6 +25,8 @@ enum ExpenseStatus {
         return 'Missing Receipt';
       case ExpenseStatus.logged:
         return 'Logged';
+      case ExpenseStatus.pendingReview:
+        return 'Needs Review';
     }
   }
 
@@ -39,6 +42,8 @@ enum ExpenseStatus {
         return AppColors.error;
       case ExpenseStatus.logged:
         return AppColors.info;
+      case ExpenseStatus.pendingReview:
+        return AppColors.warning;
     }
   }
 
@@ -54,6 +59,8 @@ enum ExpenseStatus {
         return AppColors.error.withOpacity(0.1);
       case ExpenseStatus.logged:
         return AppColors.info.withOpacity(0.1);
+      case ExpenseStatus.pendingReview:
+        return AppColors.warning.withOpacity(0.1);
     }
   }
 
@@ -69,11 +76,13 @@ enum ExpenseStatus {
         return Icons.receipt_rounded;
       case ExpenseStatus.logged:
         return Icons.receipt_long_rounded;
+      case ExpenseStatus.pendingReview:
+        return Icons.rate_review_rounded;
     }
   }
 
   static ExpenseStatus fromString(String status) {
-    switch (status.toLowerCase()) {
+    switch (status.toLowerCase().trim()) {
       case 'pending':
         return ExpenseStatus.pending;
       case 'verified':
@@ -85,6 +94,10 @@ enum ExpenseStatus {
         return ExpenseStatus.missing;
       case 'logged':
         return ExpenseStatus.logged;
+      case 'pending_review':
+      case 'pending review':
+      case 'needs review':
+        return ExpenseStatus.pendingReview;
       default:
         return ExpenseStatus.pending;
     }
@@ -297,17 +310,36 @@ class Expense {
 
   String get formattedDate {
     final now = DateTime.now();
-    final difference = now.difference(date);
+    final dayOnly = DateTime(date.year, date.month, date.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final difference = today.difference(dayOnly).inDays;
+    final hasTime = date.hour != 0 || date.minute != 0 || date.second != 0;
+    final timeLabel = hasTime
+        ? ' · ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}'
+        : '';
 
-    if (difference.inDays == 0) {
-      return 'Today';
-    } else if (difference.inDays == 1) {
-      return 'Yesterday';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays} days ago';
+    if (difference == 0) {
+      return 'Today$timeLabel';
+    } else if (difference == 1) {
+      return 'Yesterday$timeLabel';
+    } else if (difference > 1 && difference < 7) {
+      return '$difference days ago$timeLabel';
     } else {
-      return '${date.month}/${date.day}/${date.year}';
+      final base = '${date.month}/${date.day}/${date.year}';
+      return '$base$timeLabel';
     }
+  }
+
+  /// Absolute date+time for detail views and logging.
+  String get formattedDateTime {
+    final hasTime = date.hour != 0 || date.minute != 0 || date.second != 0;
+    final y = date.year.toString().padLeft(4, '0');
+    final m = date.month.toString().padLeft(2, '0');
+    final d = date.day.toString().padLeft(2, '0');
+    if (!hasTime) return '$y-$m-$d';
+    final hh = date.hour.toString().padLeft(2, '0');
+    final mm = date.minute.toString().padLeft(2, '0');
+    return '$y-$m-$d $hh:$mm';
   }
 
   bool get hasReceipt => receiptImage != null && receiptImage!.isNotEmpty;

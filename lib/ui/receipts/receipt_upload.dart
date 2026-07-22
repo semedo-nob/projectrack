@@ -12,16 +12,24 @@ import 'package:projectrack1/constants/models/projects_model.dart';
 import 'package:projectrack1/themes/app_colors.dart';
 import 'package:provider/provider.dart';
 
+import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
+import '../../service/expense_duplicate_service.dart';
+import '../../service/receipt_validation_service.dart';
 
 class ReceiptOcrScreen extends StatefulWidget {
   final String? initialImagePath;
   final String? initialProjectId;
   final String? projectId;
   final String? projectName;
+  final String? expenseId;
+  final String? initialMerchant;
+  final double? initialAmount;
+  final String? initialDate;
+  final String? initialNotes;
 
   const ReceiptOcrScreen({
     super.key,
@@ -29,6 +37,11 @@ class ReceiptOcrScreen extends StatefulWidget {
     this.initialProjectId,
     this.projectId,
     this.projectName,
+    this.expenseId,
+    this.initialMerchant,
+    this.initialAmount,
+    this.initialDate,
+    this.initialNotes,
   });
 
   @override
@@ -49,48 +62,14 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
   double? _ocrConfidence;
   String? _ocrErrorMessage;
   bool _isValidReceipt = false;
-  Map<String, dynamic> _validationResults = {};
+  bool _manualOverride = false;
+  ReceiptValidationResult? _validationResult;
+  String? _ocrRawText;
 
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-
-  // Common merchant names for better recognition
-  final List<String> _commonMerchants = [
-    'Walmart', 'Target', 'Costco', 'Home Depot', 'Lowe\'s',
-    'Starbucks', 'McDonald\'s', 'Amazon', 'Uber', 'Lyft',
-    'Shell', 'Exxon', 'CVS', 'Walgreens', 'Kroger', 'Safeway',
-    'Whole Foods', 'Trader Joe\'s', 'Best Buy', 'Apple Store',
-    'Office Depot', 'Staples', 'Ace Hardware', 'Menards'
-  ];
-
-  // Keywords that indicate a receipt
-  final List<String> _receiptKeywords = [
-    'receipt', 'invoice', 'bill', 'purchase', 'sale', 'payment',
-    'total', 'amount', 'subtotal', 'tax', 'cash', 'change',
-    'thank you', 'store', 'merchant', 'customer', 'order',
-    'transaction', 'card', 'visa', 'mastercard', 'amex',
-    'cashier', 'register', 'terminal', 'authorization'
-  ];
-
-  // Keywords that might indicate non-receipt images
-  final List<String> _rejectionKeywords = [
-    'selfie', 'profile', 'avatar', 'photo of me', 'my picture',
-    'screenshot', 'screen capture', 'instagram', 'facebook',
-    'whatsapp', 'snapchat', 'memes', 'funny', 'wallpaper'
-  ];
-
-  // Date patterns that should be present in a receipt
-  final List<RegExp> _receiptDatePatterns = [
-    RegExp(r'date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-    RegExp(r'transaction\s+date:?\s*\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-    RegExp(r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}', caseSensitive: false),
-  ];
-
-  // Amount patterns that should be present
-  final List<RegExp> _receiptAmountPatterns = [
-    RegExp(r'total:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-    RegExp(r'amount:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-    RegExp(r'balance due:?\s*[\$\€\£]?\s*\d+\.?\d{0,2}', caseSensitive: false),
-  ];
+  static const _validationService = ReceiptValidationService();
+  static const _duplicateService = ExpenseDuplicateService();
+  DateTime _receiptDateTime = DateTime.now();
 
   @override
   void initState() {
@@ -104,9 +83,44 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
       if (widget.initialProjectId != null) {
         _selectedProjectId = widget.initialProjectId;
       }
-      // Set default date to today
-      if (_dateController.text.isEmpty) {
-        _dateController.text = DateFormat('MMM d, yyyy').format(DateTime.now());
+      if (widget.initialMerchant != null && widget.initialMerchant!.isNotEmpty) {
+        _merchantController.text = widget.initialMerchant!;
+      }
+      if (widget.initialAmount != null && widget.initialAmount! > 0) {
+        _amountController.text = widget.initialAmount!.toStringAsFixed(2);
+      }
+      if (widget.initialNotes != null && widget.initialNotes!.isNotEmpty) {
+        _notesController.text = widget.initialNotes!;
+      }
+      if (widget.initialDate != null && widget.initialDate!.isNotEmpty) {
+        try {
+          final parsed = DateTime.parse(widget.initialDate!);
+          _receiptDateTime = parsed;
+          _dateController.text = _validationService.formatParsedDate(
+            parsed,
+            includeTime: true,
+          );
+        } catch (_) {
+          final parsed = _validationService.parseUserDateTime(widget.initialDate!);
+          if (parsed != null) {
+            _receiptDateTime = parsed;
+            _dateController.text = _validationService.formatParsedDate(parsed);
+          } else {
+            _dateController.text = widget.initialDate!;
+          }
+        }
+      } else if (_dateController.text.isEmpty) {
+        _receiptDateTime = DateTime.now();
+        _dateController.text = _validationService.formatParsedDate(
+          _receiptDateTime,
+          includeTime: true,
+        );
+      }
+      if (widget.expenseId != null &&
+          widget.initialImagePath != null &&
+          widget.initialImagePath!.isNotEmpty) {
+        _isValidReceipt = true;
+        _manualOverride = false;
       }
     });
   }
@@ -168,11 +182,14 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
 
   Future<void> _pickCamera() async {
     try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 85,
-        preferredCameraDevice: CameraDevice.rear,
+      final XFile? image = await auth.runWithoutBiometricLock(
+        () => picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+          preferredCameraDevice: CameraDevice.rear,
+        ),
       );
       if (image != null && mounted) {
         setState(() {
@@ -180,7 +197,9 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           _ocrConfidence = null;
           _ocrErrorMessage = null;
           _isValidReceipt = false;
-          _validationResults = {};
+          _manualOverride = false;
+          _validationResult = null;
+          _ocrRawText = null;
         });
         _runOcr(image.path);
       }
@@ -198,10 +217,13 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
 
   Future<void> _pickGallery() async {
     try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 85,
+      final XFile? image = await auth.runWithoutBiometricLock(
+        () => picker.pickImage(
+          source: ImageSource.gallery,
+          imageQuality: 85,
+        ),
       );
       if (image != null && mounted) {
         setState(() {
@@ -209,7 +231,9 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           _ocrConfidence = null;
           _ocrErrorMessage = null;
           _isValidReceipt = false;
-          _validationResults = {};
+          _manualOverride = false;
+          _validationResult = null;
+          _ocrRawText = null;
         });
         _runOcr(image.path);
       }
@@ -225,82 +249,25 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
     }
   }
 
-  bool _validateReceipt(String text) {
-    final lowerText = text.toLowerCase();
-    final results = <String, bool>{};
+  void _applyValidationResult(ReceiptValidationResult result) {
+    _validationResult = result;
+    _isValidReceipt = result.isValid;
+    _ocrConfidence = result.confidence;
 
-    // Check for receipt keywords (at least 2 should match)
-    int receiptKeywordCount = 0;
-    for (final keyword in _receiptKeywords) {
-      if (lowerText.contains(keyword)) {
-        receiptKeywordCount++;
-      }
+    final parsed = result.parsed;
+    if (parsed.amount != null) {
+      _amountController.text = parsed.amount!.toStringAsFixed(2);
     }
-    results['receiptKeywords'] = receiptKeywordCount >= 2;
-
-    // Check for rejection keywords (if any match, reject immediately)
-    for (final keyword in _rejectionKeywords) {
-      if (lowerText.contains(keyword)) {
-        results['rejectionKeywords'] = false;
-        _validationResults = results;
-        return false;
-      }
+    if (parsed.date != null) {
+      _receiptDateTime = parsed.date!;
+      _dateController.text = _validationService.formatParsedDate(
+        parsed.date!,
+        includeTime: parsed.hasTime,
+      );
     }
-    results['rejectionKeywords'] = true;
-
-    // Check for date patterns
-    bool hasDate = false;
-    for (final pattern in _receiptDatePatterns) {
-      if (pattern.hasMatch(text)) {
-        hasDate = true;
-        break;
-      }
+    if (parsed.merchant != null && _merchantController.text.isEmpty) {
+      _merchantController.text = parsed.merchant!;
     }
-    results['hasDate'] = hasDate;
-
-    // Check for amount patterns
-    bool hasAmount = false;
-    for (final pattern in _receiptAmountPatterns) {
-      if (pattern.hasMatch(text)) {
-        hasAmount = true;
-        break;
-      }
-    }
-    results['hasAmount'] = hasAmount;
-
-    // Check for common merchant names
-    bool hasMerchant = false;
-    for (final merchant in _commonMerchants) {
-      if (lowerText.contains(merchant.toLowerCase())) {
-        hasMerchant = true;
-        break;
-      }
-    }
-    results['hasMerchant'] = hasMerchant;
-
-    // Check for typical receipt structure (multiple lines, numbers)
-    final lines = text.split('\n').where((l) => l.trim().isNotEmpty).length;
-    results['hasMultipleLines'] = lines > 5;
-
-    // Check for currency symbols
-    results['hasCurrency'] = text.contains(RegExp(r'[\$\€\£]'));
-
-    // Check for numbers (receipts have many numbers)
-    final numbers = RegExp(r'\d+').allMatches(text).length;
-    results['hasNumbers'] = numbers > 10;
-
-    _validationResults = results;
-
-    // Overall validation: must have at least 3 of these conditions
-    int validConditions = [
-      results['receiptKeywords'] ?? false,
-      results['hasDate'] ?? false,
-      results['hasAmount'] ?? false,
-      results['hasMerchant'] ?? false,
-      results['hasCurrency'] ?? false,
-    ].where((v) => v).length;
-
-    return validConditions >= 3;
   }
 
   Future<void> _runOcr(String path) async {
@@ -309,48 +276,53 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
       _isProcessing = true;
       _ocrErrorMessage = null;
       _isValidReceipt = false;
+      _manualOverride = false;
     });
 
     try {
       final inputImage = InputImage.fromFilePath(path);
       final recognizedText = await _textRecognizer.processImage(inputImage);
       final text = recognizedText.text;
+      _ocrRawText = text;
 
       if (!mounted) return;
 
-      // Validate if it's a receipt
-      final isValid = _validateReceipt(text);
-
-      // Calculate confidence based on validation results
-      double confidence = 0.0;
-      if (isValid) {
-        int totalConditions = _validationResults.length;
-        int trueConditions = _validationResults.values.where((v) => v).length;
-        confidence = trueConditions / totalConditions;
-      }
+      final result = _validationService.validate(text);
 
       setState(() {
         _isProcessing = false;
-        _isValidReceipt = isValid;
-        _ocrConfidence = confidence;
+        _applyValidationResult(result);
       });
 
-      if (isValid) {
-        _parseAndFill(text);
+      if (result.isValid) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Receipt detected with ${(confidence * 100).toInt()}% confidence'),
+            content: Text(
+              '${_validationService.tierMessage(result.tier)} (${(result.confidence * 100).toInt()}% confidence)',
+            ),
             backgroundColor: AppColors.success,
             duration: const Duration(seconds: 2),
           ),
         );
-      } else {
+      } else if (result.allowManualOverride) {
         setState(() {
-          _ocrErrorMessage = 'This doesn\'t appear to be a valid receipt. Please try again.';
+          _ocrErrorMessage = _validationService.tierMessage(result.tier);
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Not a valid receipt. Please capture a clear receipt image.'),
+            content: Text(_validationService.tierMessage(result.tier)),
+            backgroundColor: AppColors.warning,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      } else {
+        setState(() {
+          _ocrErrorMessage = result.rejectionReason ??
+              _validationService.tierMessage(result.tier);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_ocrErrorMessage!),
             backgroundColor: AppColors.warning,
             duration: const Duration(seconds: 3),
           ),
@@ -374,187 +346,153 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
     }
   }
 
-  void _parseAndFill(String text) {
-    if (text.trim().isEmpty) return;
+  bool get _canSave =>
+      !_isProcessing &&
+      !_isSaving &&
+      (_isValidReceipt || _manualOverride) &&
+      _imagePath != null;
 
-    final lines = text.split('\n').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-
-    // Parse amount
-    _parseAmount(lines);
-
-    // Parse date
-    _parseDate(lines);
-
-    // Parse merchant
-    _parseMerchant(lines);
+  Future<void> _confirmManualSave() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save without full validation?'),
+        content: const Text(
+          'This receipt could not be fully verified automatically. '
+          'Only save if you have checked the merchant, date, and amount.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save Anyway'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() => _manualOverride = true);
+      await _saveExpense();
+    }
   }
 
-  void _parseAmount(List<String> lines) {
-    // Look for common amount patterns
-    final amountRegex = RegExp(
-      r'(?:total|amount|sum|balance|due|price|cost|grand total|amount due)[\s:]*[\$€£]?\s*([\d,]+\.?\d{0,2})',
-      caseSensitive: false,
+  Future<void> _pickReceiptDateTime() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _receiptDateTime,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: AppColors.primary,
+              brightness: isDark ? Brightness.dark : Brightness.light,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (pickedDate == null || !mounted) return;
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_receiptDateTime),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: AppColors.primary,
+              brightness: isDark ? Brightness.dark : Brightness.light,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
-    // Also look for standalone amounts at end of lines
-    final standaloneRegex = RegExp(
-      r'[\$€£]\s*([\d,]+\.?\d{0,2})|([\d,]+\.\d{2})\s*$',
-      caseSensitive: false,
+    final combined = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      pickedTime?.hour ?? _receiptDateTime.hour,
+      pickedTime?.minute ?? _receiptDateTime.minute,
     );
-
-    double? bestAmount;
-    int bestScore = -1;
-
-    for (int i = 0; i < lines.length; i++) {
-      final line = lines[i];
-
-      // Check for total-related lines (higher priority)
-      final totalMatch = amountRegex.firstMatch(line);
-      if (totalMatch != null) {
-        final numStr = (totalMatch.group(1) ?? '').replaceAll(',', '');
-        final v = double.tryParse(numStr);
-        if (v != null && v > 0 && v < 1000000) {
-          // Prioritize lines with "total" keyword
-          if (line.toLowerCase().contains('total')) {
-            bestAmount = v;
-            bestScore = 10;
-            break;
-          }
-          if (bestScore < 5) {
-            bestAmount = v;
-            bestScore = 5;
-          }
-        }
-      }
-
-      // Check for standalone amounts (lower priority)
-      final standaloneMatch = standaloneRegex.firstMatch(line);
-      if (standaloneMatch != null && bestScore < 3) {
-        final numStr = (standaloneMatch.group(1) ?? standaloneMatch.group(2) ?? '').replaceAll(',', '');
-        final v = double.tryParse(numStr);
-        if (v != null && v > 0 && v < 1000000) {
-          bestAmount = v;
-          bestScore = 3;
-        }
-      }
-    }
-
-    if (bestAmount != null) {
-      _amountController.text = bestAmount.toStringAsFixed(2);
-    }
+    setState(() {
+      _receiptDateTime = combined;
+      _dateController.text = _validationService.formatParsedDate(
+        combined,
+        includeTime: true,
+      );
+    });
   }
 
-  void _parseDate(List<String> lines) {
-    // Try multiple date formats
-    final dateFormats = [
-      RegExp(r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{2,4})'), // MM/DD/YYYY or DD/MM/YYYY
-      RegExp(r'(\w{3,9})\s+(\d{1,2}),?\s*(\d{4})'), // Month DD, YYYY
-      RegExp(r'(\d{4})[/\-\.](\d{1,2})[/\-\.](\d{1,2})'), // YYYY-MM-DD
-      RegExp(r'(\d{1,2})\s+(\w{3,9})\s+(\d{4})'), // DD Month YYYY
-    ];
+  Future<bool> _confirmDuplicatesIfNeeded({
+    required String merchant,
+    required double amount,
+    required DateTime expenseDate,
+  }) async {
+    if (widget.expenseId != null) return true;
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final existing = await db.getExpensesByProject(_selectedProjectId!);
+    final matches = _duplicateService.findMatches(
+      candidates: existing,
+      projectId: _selectedProjectId!,
+      merchant: merchant,
+      amount: amount,
+      date: expenseDate,
+    );
+    if (matches.isEmpty || !mounted) return true;
 
-    DateTime? bestDate;
-
-    for (final line in lines) {
-      for (final format in dateFormats) {
-        final match = format.firstMatch(line);
-        if (match != null) {
-          try {
-            DateTime? parsed;
-
-            if (format.pattern.contains('w{3,9}')) {
-              // Handle month name formats
-              final monthStr = match.group(1)!.toLowerCase();
-              final day = int.parse(match.group(2)!);
-              final year = int.parse(match.group(3)!);
-
-              final months = [
-                'january', 'february', 'march', 'april', 'may', 'june',
-                'july', 'august', 'september', 'october', 'november', 'december'
-              ];
-
-              int month = -1;
-              for (int i = 0; i < months.length; i++) {
-                if (months[i].startsWith(monthStr.substring(0, 3))) {
-                  month = i + 1;
-                  break;
-                }
-              }
-
-              if (month >= 1 && month <= 12) {
-                parsed = DateTime(year, month, day);
-              }
-            } else {
-              // Handle numeric formats
-              final a = int.parse(match.group(1)!);
-              final b = int.parse(match.group(2)!);
-              final c = int.parse(match.group(3)!);
-
-              final year = c > 99 ? c : 2000 + c;
-
-              // Try to determine if it's MM/DD or DD/MM
-              if (a > 12) {
-                // Must be DD/MM
-                parsed = DateTime(year, b, a);
-              } else if (b > 12) {
-                // Must be MM/DD
-                parsed = DateTime(year, a, b);
-              } else {
-                // Ambiguous, try both and pick the one that makes sense
-                final date1 = DateTime(year, a, b);
-                final date2 = DateTime(year, b, a);
-
-                if (date1.isBefore(DateTime.now()) && date1.year == year) {
-                  parsed = date1;
-                } else if (date2.isBefore(DateTime.now()) && date2.year == year) {
-                  parsed = date2;
-                }
-              }
-            }
-
-            if (parsed != null && parsed.year > 2000 && parsed.year < 2100) {
-              bestDate = parsed;
-              break;
-            }
-          } catch (_) {}
-        }
-      }
-      if (bestDate != null) break;
-    }
-
-    if (bestDate != null) {
-      _dateController.text = DateFormat('MMM d, yyyy').format(bestDate);
-    }
-  }
-
-  void _parseMerchant(List<String> lines) {
-    if (lines.isEmpty) return;
-
-    // Look for known merchant names first
-    String? foundMerchant;
-    for (final line in lines) {
-      final lowerLine = line.toLowerCase();
-      for (final merchant in _commonMerchants) {
-        if (lowerLine.contains(merchant.toLowerCase())) {
-          foundMerchant = merchant;
-          break;
-        }
-      }
-      if (foundMerchant != null) break;
-    }
-
-    // If no known merchant found, use first non-empty line
-    if (foundMerchant == null && lines.isNotEmpty) {
-      String merchant = lines.first;
-      // Clean up common OCR artifacts
-      merchant = merchant.replaceAll(RegExp(r"[^a-zA-Z0-9\s\.&'-]"), '');
-      if (merchant.length > 50) merchant = merchant.substring(0, 50);
-      foundMerchant = merchant;
-    }
-
-    if (foundMerchant != null && _merchantController.text.isEmpty) {
-      _merchantController.text = foundMerchant;
-    }
+    final top = matches.take(3).toList();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          matches.length == 1
+              ? 'Possible duplicate receipt'
+              : '${matches.length} similar receipts found',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This looks like a purchase you may have logged already '
+              '(same/similar merchant, amount, and date).',
+            ),
+            const SizedBox(height: 12),
+            ...top.map((m) {
+              final e = m.expense;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '• ${e.merchant} · ${e.formattedAmount} · ${e.formattedDate}\n'
+                  '  ${(m.similarity * 100).round()}% match · ${m.reason}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              );
+            }),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save Anyway'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<void> _saveExpense() async {
@@ -564,7 +502,11 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
       return;
     }
 
-    if (!_isValidReceipt) {
+    if (!_isValidReceipt && !_manualOverride) {
+      if (_validationResult?.allowManualOverride == true) {
+        await _confirmManualSave();
+        return;
+      }
       _showError('This does not appear to be a valid receipt. Please capture a proper receipt image.');
       return;
     }
@@ -597,44 +539,85 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
         await receiptsDir.create(recursive: true);
       }
 
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'receipt_${_selectedProjectId}_$timestamp.jpg';
-      final storedPath = '${receiptsDir.path}/$fileName';
-      await File(_imagePath!).copy(storedPath);
-
-      // Parse date
-      DateTime expenseDate = DateTime.now();
-      try {
-        expenseDate = DateFormat('MMM d, yyyy').parse(_dateController.text.trim());
-      } catch (_) {
-        // Keep current date if parsing fails
+      String storedPath;
+      if (widget.expenseId != null &&
+          widget.initialImagePath != null &&
+          _imagePath == widget.initialImagePath) {
+        storedPath = _imagePath!;
+      } else {
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final fileName = 'receipt_${_selectedProjectId}_$timestamp.jpg';
+        storedPath = '${receiptsDir.path}/$fileName';
+        await File(_imagePath!).copy(storedPath);
       }
 
-      // Generate unique ID
-      final id = 'exp_${DateTime.now().millisecondsSinceEpoch}';
+      // Parse date + time from field (or picker state)
+      DateTime expenseDate = _receiptDateTime;
+      final parsedDate =
+          _validationService.parseUserDateTime(_dateController.text.trim());
+      if (parsedDate != null) {
+        expenseDate = parsedDate;
+        _receiptDateTime = parsedDate;
+      }
+
+      final shouldContinue = await _confirmDuplicatesIfNeeded(
+        merchant: merchant,
+        amount: amount,
+        expenseDate: expenseDate,
+      );
+      if (!shouldContinue) {
+        if (mounted) setState(() => _isSaving = false);
+        return;
+      }
+
+      // Generate unique ID or reuse existing for edit
+      final id = widget.expenseId ?? 'exp_${DateTime.now().millisecondsSinceEpoch}';
+      final status = _manualOverride ? 'pending_review' : 'logged';
+      final loggedAt = DateTime.now();
+      final notesBase = _notesController.text.trim().isEmpty
+          ? (_manualOverride ? 'Manually verified receipt' : 'Scanned receipt')
+          : _notesController.text.trim();
+      final notes =
+          '$notesBase · logged ${DateFormat('MMM d, yyyy h:mm a').format(loggedAt)}';
 
       // Save to database
       final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
-      final ok = await db.createExpense(
-        id: id,
-        projectId: _selectedProjectId!,
-        merchant: merchant,
-        amount: amount,
-        date: expenseDate,
-        category: 'Receipt',
-        notes: _notesController.text.trim().isEmpty
-            ? 'Scanned receipt'
-            : _notesController.text.trim(),
-        receiptImage: storedPath,
-        status: 'logged',
-      );
+      final ok = widget.expenseId != null
+          ? await db.updateExpense(
+              id: id,
+              merchant: merchant,
+              amount: amount,
+              date: expenseDate,
+              notes: notes,
+              receiptImage: storedPath,
+              status: status,
+              ocrData: _ocrRawText,
+              ocrConfidence: _ocrConfidence,
+            )
+          : await db.createExpense(
+              id: id,
+              projectId: _selectedProjectId!,
+              merchant: merchant,
+              amount: amount,
+              date: expenseDate,
+              category: 'Receipt',
+              notes: notes,
+              receiptImage: storedPath,
+              status: status,
+              ocrData: _ocrRawText,
+              ocrConfidence: _ocrConfidence,
+            );
 
       if (!mounted) return;
 
       if (ok) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Expense saved successfully!'),
+          SnackBar(
+            content: Text(
+              widget.expenseId != null
+                  ? 'Expense updated successfully!'
+                  : 'Expense saved successfully!',
+            ),
             backgroundColor: AppColors.success,
             behavior: SnackBarBehavior.floating,
           ),
@@ -715,7 +698,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                   ),
                 ),
                 title: Text(
-                  'Scan Receipt',
+                  widget.expenseId != null ? 'Edit Receipt' : 'Scan Receipt',
                   style: theme.appBarTheme.titleTextStyle?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -777,7 +760,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
               ),
 
               // Validation Results
-              if (_validationResults.isNotEmpty && !_isProcessing)
+              if (_validationResult != null && !_isProcessing)
                 SliverPadding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   sliver: SliverToBoxAdapter(
@@ -888,7 +871,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          ..._validationResults.entries.map((entry) {
+          ..._validationResult!.signals.entries.map((entry) {
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
@@ -901,7 +884,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      _getValidationLabel(entry.key),
+                      _validationService.signalLabel(entry.key),
                       style: TextStyle(
                         fontSize: 12,
                         color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
@@ -915,20 +898,6 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
         ],
       ),
     );
-  }
-
-  String _getValidationLabel(String key) {
-    switch (key) {
-      case 'receiptKeywords': return 'Contains receipt keywords';
-      case 'rejectionKeywords': return 'No rejection keywords found';
-      case 'hasDate': return 'Contains date';
-      case 'hasAmount': return 'Contains amount';
-      case 'hasMerchant': return 'Contains merchant name';
-      case 'hasMultipleLines': return 'Has multiple lines';
-      case 'hasCurrency': return 'Contains currency symbol';
-      case 'hasNumbers': return 'Contains numbers';
-      default: return key;
-    }
   }
 
   Widget _buildReceiptImage(bool isDark) {
@@ -1052,7 +1021,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
                       setState(() {
                         _imagePath = null;
                         _isValidReceipt = false;
-                        _validationResults = {};
+                        _validationResult = null;
                         _merchantController.clear();
                         _amountController.clear();
                       });
@@ -1151,13 +1120,7 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
         Row(
           children: [
             Expanded(
-              child: _buildTextField(
-                isDark: isDark,
-                label: 'Date',
-                controller: _dateController,
-                hint: 'MMM DD, YYYY',
-                icon: Icons.calendar_today_rounded,
-              ),
+              child: _buildDateTimeField(isDark),
             ),
             const SizedBox(width: 16),
             Expanded(child: _buildProjectDropdown(isDark)),
@@ -1173,6 +1136,64 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           hint: 'Add notes...',
           maxLines: 2,
           icon: Icons.note_alt_rounded,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDateTimeField(bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 6),
+          child: Text(
+            'Receipt date & time',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            ),
+          ),
+        ),
+        TextField(
+          controller: _dateController,
+          readOnly: true,
+          onTap: _pickReceiptDateTime,
+          style: TextStyle(
+            color: isDark ? AppColors.darkText : AppColors.lightText,
+            fontSize: 15,
+          ),
+          decoration: InputDecoration(
+            hintText: 'MMM DD, YYYY h:mm a',
+            hintStyle: TextStyle(
+              color: isDark ? AppColors.darkTextTertiary : AppColors.lightTextTertiary,
+              fontSize: 14,
+            ),
+            prefixIcon: const Icon(Icons.event_available_rounded, size: 20),
+            suffixIcon: IconButton(
+              icon: const Icon(Icons.edit_calendar_rounded, size: 20),
+              onPressed: _pickReceiptDateTime,
+            ),
+            filled: true,
+            fillColor: isDark ? AppColors.darkCard : AppColors.lightCard,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                width: 1.5,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
         ),
       ],
     );
@@ -1372,7 +1393,11 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: (_isProcessing || _isSaving || !_isValidReceipt) ? null : _saveExpense,
+            onPressed: _canSave
+                ? _saveExpense
+                : (_validationResult?.allowManualOverride == true && !_isProcessing && !_isSaving
+                    ? _confirmManualSave
+                    : null),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.black,
@@ -1395,12 +1420,20 @@ class _ReceiptOcrScreenState extends State<ReceiptOcrScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  _isValidReceipt ? Icons.save_rounded : Icons.warning_rounded,
+                  _canSave
+                      ? Icons.save_rounded
+                      : (_validationResult?.allowManualOverride == true
+                          ? Icons.warning_rounded
+                          : Icons.warning_rounded),
                   size: 20,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  _isValidReceipt ? 'Save Expense' : 'Invalid Receipt',
+                  _canSave
+                      ? (widget.expenseId != null ? 'Update Expense' : 'Save Expense')
+                      : (_validationResult?.allowManualOverride == true
+                          ? 'Review & Save'
+                          : 'Invalid Receipt'),
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,

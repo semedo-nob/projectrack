@@ -66,11 +66,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
+      // Camera/gallery/biometric sheets background the app — do not lock then.
+      if (auth.shouldSuppressBiometricLock) {
+        _shouldLockOnResume = false;
+        return;
+      }
       _shouldLockOnResume = auth.isAuthenticated && auth.biometricEnabled;
       return;
     }
     if (state == AppLifecycleState.resumed && _shouldLockOnResume) {
       _shouldLockOnResume = false;
+      if (auth.shouldSuppressBiometricLock) return;
       auth.requireBiometricUnlock();
     }
   }

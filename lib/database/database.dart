@@ -707,12 +707,38 @@ class AppDatabase extends _$AppDatabase {
     final projectId = expense.projectId;
 
     return await transaction(() async {
+      await (delete(receipts)..where((t) => t.expenseId.equals(id))).go();
       final result = await (delete(
         expenses,
       )..where((t) => t.id.equals(id))).go();
       await _updateProjectSpentAndProgress(projectId);
       return result;
     });
+  }
+
+  Future<void> insertReceiptRecord({
+    required String id,
+    required String expenseId,
+    required String imageUrl,
+    String? ocrData,
+    double? confidence,
+    DateTime? processedAt,
+  }) async {
+    await into(receipts).insertOnConflictUpdate(
+      ReceiptsCompanion(
+        id: Value(id),
+        expenseId: Value(expenseId),
+        imageUrl: Value(imageUrl),
+        ocrData: Value(ocrData),
+        confidence: Value(confidence),
+        processedAt: Value(processedAt ?? DateTime.now()),
+        createdAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<List<Receipt>> getReceiptsForExpense(String expenseId) async {
+    return (select(receipts)..where((t) => t.expenseId.equals(expenseId))).get();
   }
 
   Future<void> _updateProjectSpentAndProgress(String projectId) async {
@@ -1200,7 +1226,7 @@ class AppDatabase extends _$AppDatabase {
             projectId: Value(map['projectId'] as String),
             title: Value(map['title'] as String? ?? ''),
             description: Value(map['description'] as String?),
-            status: Value(map['status'] as String? ?? 'Todo'),
+            status: Value(map['status'] as String? ?? 'pending'),
             priority: Value(map['priority'] as String? ?? 'Medium'),
             dueDate: Value(
               map['dueDate'] == null

@@ -657,11 +657,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final picker = ImagePicker();
-    final XFile? picked = await picker.pickImage(
-      source: source,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 85,
+    final XFile? picked = await auth.runWithoutBiometricLock(
+      () => picker.pickImage(
+        source: source,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 85,
+      ),
     );
 
     if (picked == null || !context.mounted) return;

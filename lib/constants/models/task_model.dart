@@ -71,6 +71,9 @@ enum TaskStatus {
       case 'blocked':
         return TaskStatus.blocked;
       case 'pending':
+      case 'todo':
+      case 'not started':
+        return TaskStatus.pending;
       default:
         return TaskStatus.pending;
     }

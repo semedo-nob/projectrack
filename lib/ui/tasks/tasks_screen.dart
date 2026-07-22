@@ -26,15 +26,69 @@ class TasksScreen extends StatefulWidget {
 
 class _TasksScreenState extends State<TasksScreen> {
   String _filter = 'all';
+  String _sort = 'due_soon';
 
   List<ProjectTask> _applyFilter(List<ProjectTask> tasks) {
-    if (_filter == 'all') return tasks;
-    if (_filter == 'overdue') {
-      return tasks.where((t) => t.isOverdue).toList();
+    Iterable<ProjectTask> filtered = tasks;
+    switch (_filter) {
+      case 'overdue':
+        filtered = tasks.where((t) => t.isOverdue);
+        break;
+      case 'due_soon':
+        filtered = tasks.where((t) {
+          if (t.dueDate == null || t.status == TaskStatus.done) return false;
+          final due = DateTime(
+            t.dueDate!.year,
+            t.dueDate!.month,
+            t.dueDate!.day,
+          );
+          final now = DateTime.now();
+          final today = DateTime(now.year, now.month, now.day);
+          final inThree = today.add(const Duration(days: 3));
+          return !due.isBefore(today) && !due.isAfter(inThree);
+        });
+        break;
+      case 'high':
+        filtered = tasks.where(
+          (t) => t.priority == TaskPriority.high && t.status != TaskStatus.done,
+        );
+        break;
+      case 'all':
+        break;
+      default:
+        filtered = tasks.where((t) => t.status.storageValue == _filter);
     }
-    return tasks
-        .where((t) => t.status.storageValue == _filter)
-        .toList();
+
+    final list = filtered.toList();
+    list.sort((a, b) {
+      switch (_sort) {
+        case 'priority':
+          final cmp = b.priority.index.compareTo(a.priority.index);
+          if (cmp != 0) return cmp;
+          return _compareDue(a, b);
+        case 'newest':
+          return b.createdAt.compareTo(a.createdAt);
+        case 'title':
+          return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+        case 'due_soon':
+        default:
+          return _compareDue(a, b);
+      }
+    });
+    return list;
+  }
+
+  int _compareDue(ProjectTask a, ProjectTask b) {
+    // Overdue first, then soonest due, then no due date last.
+    if (a.isOverdue != b.isOverdue) return a.isOverdue ? -1 : 1;
+    if (a.dueDate == null && b.dueDate == null) {
+      return b.updatedAt.compareTo(a.updatedAt);
+    }
+    if (a.dueDate == null) return 1;
+    if (b.dueDate == null) return -1;
+    final cmp = a.dueDate!.compareTo(b.dueDate!);
+    if (cmp != 0) return cmp;
+    return b.priority.index.compareTo(a.priority.index);
   }
 
   Future<void> _create() async {
@@ -71,6 +125,19 @@ class _TasksScreenState extends State<TasksScreen> {
       appBar: AppBar(
         backgroundColor: EnterpriseUi.appBarBg(isDark),
         title: Text('${widget.projectName} · Tasks'),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Sort tasks',
+            icon: const Icon(Icons.sort_rounded),
+            onSelected: (value) => setState(() => _sort = value),
+            itemBuilder: (context) => [
+              _sortItem('due_soon', 'Due soon first'),
+              _sortItem('priority', 'Priority high → low'),
+              _sortItem('newest', 'Newest created'),
+              _sortItem('title', 'Title A → Z'),
+            ],
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _create,
@@ -91,6 +158,8 @@ class _TasksScreenState extends State<TasksScreen> {
                 _chip('done', 'Done'),
                 _chip('blocked', 'Blocked'),
                 _chip('overdue', 'Overdue'),
+                _chip('due_soon', 'Due soon'),
+                _chip('high', 'High priority'),
               ],
             ),
           ),
@@ -105,8 +174,20 @@ class _TasksScreenState extends State<TasksScreen> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final filtered = _applyFilter(snapshot.data!);
-                if (filtered.isEmpty) {
+                final all = snapshot.data!;
+                final filtered = _applyFilter(all);
+                final open = all.where((t) => t.status != TaskStatus.done).length;
+                final overdue = all.where((t) => t.isOverdue).length;
+                final high = all
+                    .where(
+                      (t) =>
+                          t.priority == TaskPriority.high &&
+                          t.status != TaskStatus.done,
+                    )
+                    .length;
+                final done = all.where((t) => t.status == TaskStatus.done).length;
+
+                if (all.isEmpty) {
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -122,9 +203,7 @@ class _TasksScreenState extends State<TasksScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            _filter == 'all'
-                                ? 'No tasks yet'
-                                : 'No tasks in this filter',
+                            'No tasks yet',
                             style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.w600,
@@ -144,12 +223,11 @@ class _TasksScreenState extends State<TasksScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          if (_filter == 'all')
-                            FilledButton.icon(
-                              onPressed: _create,
-                              icon: const Icon(Icons.add_rounded),
-                              label: const Text('Create first task'),
-                            ),
+                          FilledButton.icon(
+                            onPressed: _create,
+                            icon: const Icon(Icons.add_rounded),
+                            label: const Text('Create first task'),
+                          ),
                         ],
                       ),
                     ),
@@ -158,9 +236,33 @@ class _TasksScreenState extends State<TasksScreen> {
 
                 return ListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
-                  itemCount: filtered.length,
+                  itemCount: filtered.isEmpty ? 2 : filtered.length + 1,
                   itemBuilder: (context, index) {
-                    final task = filtered[index];
+                    if (index == 0) {
+                      return _summaryBar(
+                        isDark: isDark,
+                        open: open,
+                        overdue: overdue,
+                        high: high,
+                        done: done,
+                      );
+                    }
+                    if (filtered.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 40),
+                        child: Center(
+                          child: Text(
+                            'No tasks in this filter',
+                            style: TextStyle(
+                              color: isDark
+                                  ? AppColors.darkTextSecondary
+                                  : AppColors.lightTextSecondary,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    final task = filtered[index - 1];
                     return TaskCard(
                       task: task,
                       isDark: isDark,
@@ -171,6 +273,67 @@ class _TasksScreenState extends State<TasksScreen> {
                   },
                 );
               },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _sortItem(String value, String label) {
+    return PopupMenuItem(
+      value: value,
+      child: Text(_sort == value ? '✓ $label' : label),
+    );
+  }
+
+  Widget _summaryBar({
+    required bool isDark,
+    required int open,
+    required int overdue,
+    required int high,
+    required int done,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+      ),
+      child: Row(
+        children: [
+          _stat('Open', '$open', AppColors.info),
+          _stat('Overdue', '$overdue', AppColors.error),
+          _stat('High', '$high', AppColors.warning),
+          _stat('Done', '$done', AppColors.success),
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(String label, String value, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: color.withOpacity(0.9),
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

@@ -1,5 +1,6 @@
 // lib/providers/drift_database_provider.dart
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/drift.dart' as drift;
 import 'package:fl_chart/fl_chart.dart';
@@ -474,6 +475,8 @@ class DriftDatabaseProvider extends ChangeNotifier {
     String? unitOriginal,
     double? quantityBase,
     String? unitBase,
+    String? ocrData,
+    double? ocrConfidence,
   }) async {
     _setLoading(true);
     try {
@@ -497,6 +500,17 @@ class DriftDatabaseProvider extends ChangeNotifier {
           updatedAt: now,
         ),
       );
+      if (receiptImage != null &&
+          receiptImage.isNotEmpty &&
+          (ocrData != null || ocrConfidence != null)) {
+        await _database.insertReceiptRecord(
+          id: 'rcpt_$id',
+          expenseId: id,
+          imageUrl: receiptImage,
+          ocrData: ocrData,
+          confidence: ocrConfidence,
+        );
+      }
       await _triggerAutoBackup();
       _clearError();
       return true;
@@ -570,6 +584,8 @@ class DriftDatabaseProvider extends ChangeNotifier {
     String? unitOriginal,
     double? quantityBase,
     String? unitBase,
+    String? ocrData,
+    double? ocrConfidence,
   }) async {
     _setLoading(true);
     try {
@@ -599,6 +615,18 @@ class DriftDatabaseProvider extends ChangeNotifier {
           updatedAt: drift.Value(now),
         ),
       );
+      final imagePath = receiptImage ?? existing.receiptImage;
+      if (imagePath != null &&
+          imagePath.isNotEmpty &&
+          (ocrData != null || ocrConfidence != null)) {
+        await _database.insertReceiptRecord(
+          id: 'rcpt_$id',
+          expenseId: id,
+          imageUrl: imagePath,
+          ocrData: ocrData,
+          confidence: ocrConfidence,
+        );
+      }
       await _triggerAutoBackup();
       _clearError();
       return true;
@@ -613,7 +641,15 @@ class DriftDatabaseProvider extends ChangeNotifier {
   Future<bool> deleteExpense(String id) async {
     _setLoading(true);
     try {
+      final existing = await _database.getExpense(id);
+      final imagePath = existing?.receiptImage;
       await _database.deleteExpense(id);
+      if (imagePath != null && imagePath.isNotEmpty) {
+        final file = File(imagePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
       await _triggerAutoBackup();
       if (_currentExpense?.id == id) {
         _currentExpense = null;
@@ -870,7 +906,10 @@ class DriftDatabaseProvider extends ChangeNotifier {
         final todayStart = DateTime(now.year, now.month, now.day);
         for (final task in tasks) {
           final due = task.dueDate;
-          if (due == null || task.status == 'Done') continue;
+          if (due == null ||
+              TaskStatus.fromString(task.status) == TaskStatus.done) {
+            continue;
+          }
           if ((due.isAfter(todayStart) && due.isBefore(tomorrow)) ||
               (due.year == now.year &&
                   due.month == now.month &&

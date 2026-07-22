@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/drift_database_provider.dart';
 import '../routes/app_routes.dart';
@@ -115,10 +116,13 @@ class _MainScaffoldState extends State<MainScaffold>
   Future<void> _scanReceiptWithCamera() async {
     final status = await Permission.camera.request();
     if (status.isGranted) {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
       final ImagePicker picker = ImagePicker();
-      final XFile? image = await picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 85,
+      final XFile? image = await auth.runWithoutBiometricLock(
+        () => picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 85,
+        ),
       );
 
       if (image != null && mounted) {
@@ -143,10 +147,13 @@ class _MainScaffoldState extends State<MainScaffold>
   }
 
   Future<void> _scanReceiptFromGallery() async {
+    final auth = Provider.of<AuthProvider>(context, listen: false);
     final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
+    final XFile? image = await auth.runWithoutBiometricLock(
+      () => picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+      ),
     );
 
     if (image != null && mounted) {
