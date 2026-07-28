@@ -9,6 +9,7 @@ import 'package:projectrack1/themes/app_colors.dart';
 import 'package:projectrack1/providers/auth_provider.dart';
 import 'package:projectrack1/providers/theme_provider.dart';
 import 'package:projectrack1/providers/drift_database_provider.dart';
+import 'package:projectrack1/constants/models/projects_model.dart';
 import 'package:projectrack1/utils/avatar_image.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -92,6 +93,140 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Tasks belong to a specific project — ask which one to open.
+  Future<void> _openTasksForProject() async {
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final projects = await db.getAllProjects();
+    if (!mounted) return;
+
+    if (projects.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Create a project first to manage tasks'),
+        ),
+      );
+      return;
+    }
+
+    if (projects.length == 1) {
+      final p = projects.first;
+      context.push(
+        AppRoutes.projectTasks.replaceFirst(':id', p.id),
+        extra: p.name,
+      );
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final selected = await showModalBottomSheet<Project>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.65,
+          ),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Open tasks for which project?',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppColors.darkText
+                              : AppColors.lightText,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+                  itemCount: projects.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, index) {
+                    final p = projects[index];
+                    return ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(EnterpriseUi.radiusMd),
+                        side: BorderSide(
+                          color: isDark
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder,
+                        ),
+                      ),
+                      leading: CircleAvatar(
+                        backgroundColor: AppColors.primary.withOpacity(0.12),
+                        child: const Icon(
+                          Icons.folder_rounded,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      title: Text(
+                        p.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppColors.darkText
+                              : AppColors.lightText,
+                        ),
+                      ),
+                      subtitle: Text(
+                        p.category.isEmpty ? p.status : p.category,
+                        style: TextStyle(
+                          color: isDark
+                              ? AppColors.darkTextSecondary
+                              : AppColors.lightTextSecondary,
+                        ),
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.pop(ctx, p),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !mounted) return;
+    context.push(
+      AppRoutes.projectTasks.replaceFirst(':id', selected.id),
+      extra: selected.name,
     );
   }
 
@@ -860,7 +995,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(width: 10),
           Expanded(
             child: GestureDetector(
-              onTap: () => context.push(AppRoutes.dailyLogsHistory),
+              onTap: _openTasksForProject,
               child: _buildStatCard(
                 isDark: isDark,
                 value: '$_taskCount',

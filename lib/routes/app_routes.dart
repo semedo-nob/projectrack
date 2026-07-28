@@ -17,6 +17,8 @@ import '../ui/projects/create_project_screen.dart';
 import '../ui/projects/project_logs.dart';
 import '../ui/projects/project_overview_screen.dart';
 import '../ui/projects/daily_material_entry_screen.dart';
+import '../ui/projects/project_activities_screen.dart';
+import '../ui/projects/project_schedule_screen.dart';
 import '../ui/projects/projects_screen.dart';
 import '../ui/receipts/receipt_detail_view.dart';
 import '../ui/receipts/receipt_gallery.dart';
@@ -72,6 +74,8 @@ class AppRoutes {
   static const String projectTaskDetail = '/project/:id/tasks/:taskId';
   static const String projectTaskEdit = '/project/:id/tasks/:taskId/edit';
   static const String projectInventory = '/project/:id/inventory';
+  static const String projectActivities = '/project/:id/activities';
+  static const String projectSchedule = '/project/:id/schedule';
 }
 
 final GoRouter router = GoRouter(
@@ -356,6 +360,30 @@ final GoRouter router = GoRouter(
         final id = state.pathParameters['id'] ?? '';
         final projectName = state.extra as String? ?? 'Project';
         return InventoryScreen(projectId: id, projectName: projectName);
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectActivities,
+      name: 'project-activities',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final projectName = state.extra as String? ?? 'Project';
+        return ProjectActivitiesScreen(
+          projectId: id,
+          projectName: projectName,
+        );
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.projectSchedule,
+      name: 'project-schedule',
+      builder: (context, state) {
+        final id = state.pathParameters['id'] ?? '';
+        final projectName = state.extra as String? ?? 'Project';
+        return ProjectScheduleScreen(
+          projectId: id,
+          projectName: projectName,
+        );
       },
     ),
     GoRoute(

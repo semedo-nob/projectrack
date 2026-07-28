@@ -187,6 +187,46 @@ class MaterialUsages extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Non-financial project activity / work log (who did what, hours, notes).
+@DataClassName('ActivityLogRow')
+class ActivityLogs extends Table {
+  TextColumn get id => text().withLength(min: 1, max: 50)();
+  TextColumn get projectId => text().references(Projects, #id)();
+  TextColumn get title => text()();
+  TextColumn get description => text().nullable()();
+  /// labour | site | delivery | inspection | other
+  TextColumn get activityType => text().withDefault(const Constant('other'))();
+  DateTimeColumn get occurredAt => dateTime()();
+  RealColumn get hoursSpent => real().nullable()();
+  TextColumn get performedBy => text().nullable()();
+  TextColumn get location => text().nullable()();
+  TextColumn get linkedExpenseId => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Project milestones / phases for schedule adherence.
+@DataClassName('ProjectMilestoneRow')
+class ProjectMilestones extends Table {
+  TextColumn get id => text().withLength(min: 1, max: 50)();
+  TextColumn get projectId => text().references(Projects, #id)();
+  TextColumn get title => text()();
+  TextColumn get description => text().nullable()();
+  DateTimeColumn get dueDate => dateTime().nullable()();
+  /// pending | done | skipped
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ===== DATABASE CLASS =====
 
 @DriftDatabase(
@@ -202,13 +242,15 @@ class MaterialUsages extends Table {
     ProjectTags,
     InventoryItems,
     MaterialUsages,
+    ActivityLogs,
+    ProjectMilestones,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
@@ -375,6 +417,8 @@ class AppDatabase extends _$AppDatabase {
             baseUnit: 'piece',
           );
         });
+        await _seedExpandedUnits();
+        await _seedAgricultureUnits();
       },
       onUpgrade: (Migrator m, int from, int to) async {
         if (from < 2) {
@@ -499,7 +543,189 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(inventoryItems);
           await m.createTable(materialUsages);
         }
+        if (from < 5) {
+          await _seedExpandedUnits();
+        }
+        if (from < 6) {
+          await m.createTable(activityLogs);
+          await m.createTable(projectMilestones);
+          await _seedAgricultureUnits();
+        }
       },
+    );
+  }
+
+  Future<void> _seedAgricultureUnits() async {
+    Future<void> upsert({
+      required String id,
+      required String name,
+      required String displayName,
+      required String category,
+      required double toBaseFactor,
+      required String baseUnit,
+    }) async {
+      await into(unitDefs).insertOnConflictUpdate(
+        UnitDefsCompanion.insert(
+          id: id,
+          name: name,
+          displayName: displayName,
+          category: category,
+          toBaseFactor: toBaseFactor,
+          baseUnit: baseUnit,
+        ),
+      );
+    }
+
+    await upsert(
+      id: 'u_acre',
+      name: 'acre',
+      displayName: 'Acre',
+      category: 'area',
+      toBaseFactor: 4046.86,
+      baseUnit: 'm2',
+    );
+    await upsert(
+      id: 'u_hectare',
+      name: 'hectare',
+      displayName: 'Hectare',
+      category: 'area',
+      toBaseFactor: 10000.0,
+      baseUnit: 'm2',
+    );
+    await upsert(
+      id: 'u_crate',
+      name: 'crate',
+      displayName: 'Crate',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+  }
+
+  Future<void> _seedExpandedUnits() async {
+    Future<void> upsert({
+      required String id,
+      required String name,
+      required String displayName,
+      required String category,
+      required double toBaseFactor,
+      required String baseUnit,
+    }) async {
+      await into(unitDefs).insertOnConflictUpdate(
+        UnitDefsCompanion.insert(
+          id: id,
+          name: name,
+          displayName: displayName,
+          category: category,
+          toBaseFactor: toBaseFactor,
+          baseUnit: baseUnit,
+        ),
+      );
+    }
+
+    await upsert(
+      id: 'u_m3',
+      name: 'm3',
+      displayName: 'Cubic metre',
+      category: 'volume',
+      toBaseFactor: 1000.0,
+      baseUnit: 'litre',
+    );
+    await upsert(
+      id: 'u_box',
+      name: 'box',
+      displayName: 'Box',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_set',
+      name: 'set',
+      displayName: 'Set',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_bundle',
+      name: 'bundle',
+      displayName: 'Bundle',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_roll',
+      name: 'roll',
+      displayName: 'Roll',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_sheet',
+      name: 'sheet',
+      displayName: 'Sheet',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_load',
+      name: 'load',
+      displayName: 'Load / Trip',
+      category: 'count',
+      toBaseFactor: 1.0,
+      baseUnit: 'piece',
+    );
+    await upsert(
+      id: 'u_m',
+      name: 'm',
+      displayName: 'Metre',
+      category: 'length',
+      toBaseFactor: 1.0,
+      baseUnit: 'm',
+    );
+    await upsert(
+      id: 'u_cm',
+      name: 'cm',
+      displayName: 'Centimetre',
+      category: 'length',
+      toBaseFactor: 0.01,
+      baseUnit: 'm',
+    );
+    await upsert(
+      id: 'u_ft',
+      name: 'ft',
+      displayName: 'Foot',
+      category: 'length',
+      toBaseFactor: 0.3048,
+      baseUnit: 'm',
+    );
+    await upsert(
+      id: 'u_m2',
+      name: 'm2',
+      displayName: 'Square metre',
+      category: 'area',
+      toBaseFactor: 1.0,
+      baseUnit: 'm2',
+    );
+    await upsert(
+      id: 'u_hour',
+      name: 'hour',
+      displayName: 'Hour',
+      category: 'time',
+      toBaseFactor: 1.0,
+      baseUnit: 'hour',
+    );
+    await upsert(
+      id: 'u_day',
+      name: 'day',
+      displayName: 'Day',
+      category: 'time',
+      toBaseFactor: 8.0,
+      baseUnit: 'hour',
     );
   }
 
@@ -611,6 +837,12 @@ class AppDatabase extends _$AppDatabase {
         expenses,
       )..where((t) => t.projectId.equals(projectId))).go();
       await (delete(tasks)..where((t) => t.projectId.equals(projectId))).go();
+      await (delete(
+        activityLogs,
+      )..where((t) => t.projectId.equals(projectId))).go();
+      await (delete(
+        projectMilestones,
+      )..where((t) => t.projectId.equals(projectId))).go();
       await (delete(
         materialUsages,
       )..where((t) => t.projectId.equals(projectId))).go();
@@ -805,6 +1037,71 @@ class AppDatabase extends _$AppDatabase {
 
   Future<int> deleteTask(String id) =>
       (delete(tasks)..where((t) => t.id.equals(id))).go();
+
+  // ===== ACTIVITY LOG QUERIES =====
+
+  Stream<List<ActivityLogRow>> watchActivityLogs(String projectId) {
+    return (select(activityLogs)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([
+            (t) => OrderingTerm(expression: t.occurredAt, mode: OrderingMode.desc),
+          ]))
+        .watch();
+  }
+
+  Future<List<ActivityLogRow>> getActivityLogs(String projectId) {
+    return (select(activityLogs)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([
+            (t) => OrderingTerm(expression: t.occurredAt, mode: OrderingMode.desc),
+          ]))
+        .get();
+  }
+
+  Future<int> insertActivityLog(ActivityLogsCompanion row) =>
+      into(activityLogs).insert(row);
+
+  Future<bool> updateActivityLog(ActivityLogsCompanion row) =>
+      update(activityLogs).replace(row);
+
+  Future<int> deleteActivityLog(String id) =>
+      (delete(activityLogs)..where((t) => t.id.equals(id))).go();
+
+  // ===== MILESTONE QUERIES =====
+
+  Stream<List<ProjectMilestoneRow>> watchMilestones(String projectId) {
+    return (select(projectMilestones)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.sortOrder),
+            (t) => OrderingTerm(expression: t.dueDate, mode: OrderingMode.asc),
+          ]))
+        .watch();
+  }
+
+  Future<List<ProjectMilestoneRow>> getMilestones(String projectId) {
+    return (select(projectMilestones)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.sortOrder),
+            (t) => OrderingTerm(expression: t.dueDate, mode: OrderingMode.asc),
+          ]))
+        .get();
+  }
+
+  Future<ProjectMilestoneRow?> getMilestone(String id) {
+    return (select(projectMilestones)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+  }
+
+  Future<int> insertMilestone(ProjectMilestonesCompanion row) =>
+      into(projectMilestones).insert(row);
+
+  Future<bool> updateMilestone(ProjectMilestonesCompanion row) =>
+      update(projectMilestones).replace(row);
+
+  Future<int> deleteMilestone(String id) =>
+      (delete(projectMilestones)..where((t) => t.id.equals(id))).go();
 
   // ===== INVENTORY QUERIES =====
 
@@ -1030,6 +1327,16 @@ class AppDatabase extends _$AppDatabase {
         : await (select(
             receipts,
           )..where((t) => t.expenseId.isIn(expenseIds))).get();
+    final activityRows = projectIds.isEmpty
+        ? <ActivityLogRow>[]
+        : await (select(
+            activityLogs,
+          )..where((t) => t.projectId.isIn(projectIds))).get();
+    final milestoneRows = projectIds.isEmpty
+        ? <ProjectMilestoneRow>[]
+        : await (select(
+            projectMilestones,
+          )..where((t) => t.projectId.isIn(projectIds))).get();
 
     return {
       'schemaVersion': schemaVersion,
@@ -1117,6 +1424,40 @@ class AppDatabase extends _$AppDatabase {
           .toList(),
       'projectTags': tagRows
           .map((tag) => {'projectId': tag.projectId, 'tag': tag.tag})
+          .toList(),
+      'activityLogs': activityRows
+          .map(
+            (a) => {
+              'id': a.id,
+              'projectId': a.projectId,
+              'title': a.title,
+              'description': a.description,
+              'activityType': a.activityType,
+              'occurredAt': a.occurredAt.toIso8601String(),
+              'hoursSpent': a.hoursSpent,
+              'performedBy': a.performedBy,
+              'location': a.location,
+              'linkedExpenseId': a.linkedExpenseId,
+              'createdAt': a.createdAt.toIso8601String(),
+              'updatedAt': a.updatedAt.toIso8601String(),
+            },
+          )
+          .toList(),
+      'milestones': milestoneRows
+          .map(
+            (m) => {
+              'id': m.id,
+              'projectId': m.projectId,
+              'title': m.title,
+              'description': m.description,
+              'dueDate': m.dueDate?.toIso8601String(),
+              'status': m.status,
+              'sortOrder': m.sortOrder,
+              'completedAt': m.completedAt?.toIso8601String(),
+              'createdAt': m.createdAt.toIso8601String(),
+              'updatedAt': m.updatedAt.toIso8601String(),
+            },
+          )
           .toList(),
     };
   }
@@ -1278,6 +1619,71 @@ class AppDatabase extends _$AppDatabase {
           ProjectTagsCompanion(
             projectId: Value(map['projectId'] as String),
             tag: Value(map['tag'] as String? ?? ''),
+          ),
+        );
+      }
+
+      final rawActivities =
+          (backup['activityLogs'] as List<dynamic>? ?? const <dynamic>[]);
+      for (final raw in rawActivities) {
+        final map = raw as Map<String, dynamic>;
+        await into(activityLogs).insertOnConflictUpdate(
+          ActivityLogsCompanion(
+            id: Value(map['id'] as String),
+            projectId: Value(map['projectId'] as String),
+            title: Value(map['title'] as String? ?? ''),
+            description: Value(map['description'] as String?),
+            activityType: Value(map['activityType'] as String? ?? 'other'),
+            occurredAt: Value(
+              DateTime.tryParse(map['occurredAt'] as String? ?? '') ??
+                  DateTime.now(),
+            ),
+            hoursSpent: Value((map['hoursSpent'] as num?)?.toDouble()),
+            performedBy: Value(map['performedBy'] as String?),
+            location: Value(map['location'] as String?),
+            linkedExpenseId: Value(map['linkedExpenseId'] as String?),
+            createdAt: Value(
+              DateTime.tryParse(map['createdAt'] as String? ?? '') ??
+                  DateTime.now(),
+            ),
+            updatedAt: Value(
+              DateTime.tryParse(map['updatedAt'] as String? ?? '') ??
+                  DateTime.now(),
+            ),
+          ),
+        );
+      }
+
+      final rawMilestones =
+          (backup['milestones'] as List<dynamic>? ?? const <dynamic>[]);
+      for (final raw in rawMilestones) {
+        final map = raw as Map<String, dynamic>;
+        await into(projectMilestones).insertOnConflictUpdate(
+          ProjectMilestonesCompanion(
+            id: Value(map['id'] as String),
+            projectId: Value(map['projectId'] as String),
+            title: Value(map['title'] as String? ?? ''),
+            description: Value(map['description'] as String?),
+            dueDate: Value(
+              map['dueDate'] == null
+                  ? null
+                  : DateTime.tryParse(map['dueDate'] as String),
+            ),
+            status: Value(map['status'] as String? ?? 'pending'),
+            sortOrder: Value((map['sortOrder'] as num?)?.toInt() ?? 0),
+            completedAt: Value(
+              map['completedAt'] == null
+                  ? null
+                  : DateTime.tryParse(map['completedAt'] as String),
+            ),
+            createdAt: Value(
+              DateTime.tryParse(map['createdAt'] as String? ?? '') ??
+                  DateTime.now(),
+            ),
+            updatedAt: Value(
+              DateTime.tryParse(map['updatedAt'] as String? ?? '') ??
+                  DateTime.now(),
+            ),
           ),
         );
       }

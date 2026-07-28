@@ -153,18 +153,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         backgroundColor: EnterpriseUi.appBarBg(isDark),
         title: Text('${widget.projectName} · Inventory'),
-        actions: [
-          IconButton(
-            tooltip: 'Add material',
-            onPressed: _addItem,
-            icon: const Icon(Icons.add_rounded),
-          ),
-        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: EnterpriseUi.primaryFab(
         onPressed: _addItem,
-        icon: const Icon(Icons.inventory_2_outlined),
-        label: const Text('Add material'),
+        icon: Icons.add_rounded,
+        tooltip: 'Add material',
       ),
       body: Column(
         children: [

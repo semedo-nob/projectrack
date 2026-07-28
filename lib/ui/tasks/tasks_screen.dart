@@ -139,10 +139,10 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: EnterpriseUi.primaryFab(
         onPressed: _create,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Task'),
+        icon: Icons.add_rounded,
+        tooltip: 'Add task',
       ),
       body: Column(
         children: [
