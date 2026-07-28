@@ -13,12 +13,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../constants/models/expense_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/currency_provider.dart';
 import '../../providers/drift_database_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../routes/app_routes.dart';
-import '../../service/display_unit_prefs.dart';
 import '../../service/inventory_service.dart';
 import '../../service/smart_unit_suggestion_service.dart';
 import '../../service/receipt_validation_service.dart';
@@ -115,17 +115,37 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   bool _isSubmitting = false;
   String? _processingEntryId;
   String? _duplicateHint;
-  String _defaultMaterialUnitId = 'u_kg';
+  String _defaultMaterialUnitId = 'u_piece';
+  List<String> _materialSuggestions = [];
+  final Map<String, List<UnitOption>> _unitSuggestionsByEntry = {};
+  /// Units the user explicitly picked (do not auto-overwrite on material rename).
+  final Set<String> _userPickedUnitEntryIds = {};
 
   double get _totalCost => _entries.fold(0.0, (sum, entry) => sum + entry.totalCost);
 
-  static const _templatePrefsKey = 'daily_material_template_list';
-  final List<_MaterialTemplate> _defaultTemplates = const [
-    _MaterialTemplate(materialName: 'Portland cement', unitId: 'u_kg'),
-    _MaterialTemplate(materialName: 'Sand (fine)', unitId: 'u_kg'),
+  static const _templatePrefsKey = 'daily_material_template_list_v2';
+  static const _starterTemplates = <_MaterialTemplate>[
+    _MaterialTemplate(materialName: 'Portland cement', unitId: 'u_bag'),
+    _MaterialTemplate(materialName: 'Sand (fine)', unitId: 'u_tonne'),
     _MaterialTemplate(materialName: 'Rebar 12mm', unitId: 'u_piece'),
+    _MaterialTemplate(materialName: 'Paint', unitId: 'u_litre'),
+    _MaterialTemplate(materialName: 'Timber', unitId: 'u_m'),
+    _MaterialTemplate(materialName: 'Maize seed', unitId: 'u_kg'),
+    _MaterialTemplate(materialName: 'Fertilizer (NPK)', unitId: 'u_bag'),
+    _MaterialTemplate(materialName: 'Field labour', unitId: 'u_hour'),
+    _MaterialTemplate(materialName: 'Irrigation water', unitId: 'u_litre'),
   ];
-  List<_MaterialTemplate> _templates = [];
+  List<_MaterialTemplate> _userTemplates = [];
+
+  List<_MaterialTemplate> get _allQuickTemplates => [
+        ..._userTemplates,
+        ..._starterTemplates.where(
+          (s) => !_userTemplates.any(
+            (u) =>
+                u.materialName.toLowerCase() == s.materialName.toLowerCase(),
+          ),
+        ),
+      ];
 
   final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
   static const _validationService = ReceiptValidationService();
@@ -135,37 +155,118 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     super.initState();
     _loadDefaultMaterialUnit();
     _loadTemplates();
+    _loadMaterialSuggestions();
     _addNewEntry();
   }
 
   Future<void> _loadDefaultMaterialUnit() async {
     await SmartUnitSuggestionService.ensureLoaded();
-    final id = await DisplayUnitPrefs.defaultUnitIdForCategory('weight');
+    // Prefer last learned/common piece over forcing kg for every new line.
     if (!mounted) return;
     setState(() {
-      _defaultMaterialUnitId =
-          DisplayUnitPrefs.validatedDefault('weight', id);
+      _defaultMaterialUnitId = UnitService.byId('u_piece')?.id ?? 'u_kg';
     });
   }
 
   Future<void> _loadTemplates() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_templatePrefsKey) ?? [];
+    final list = prefs.getStringList(_templatePrefsKey) ??
+        prefs.getStringList('daily_material_template_list') ??
+        [];
     final decoded = list
-        .map((item) => _MaterialTemplate.fromJson(json.decode(item) as Map<String, dynamic>))
+        .map((item) {
+          try {
+            return _MaterialTemplate.fromJson(
+              json.decode(item) as Map<String, dynamic>,
+            );
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<_MaterialTemplate>()
+        .where((t) => t.materialName.trim().isNotEmpty)
         .toList();
+    if (!mounted) return;
     setState(() {
-      _templates = [..._defaultTemplates, ...decoded];
+      _userTemplates = decoded;
     });
   }
 
   Future<void> _saveTemplates() async {
     final prefs = await SharedPreferences.getInstance();
-    final userTemplates = _templates
-        .skip(_defaultTemplates.length)
+    final userTemplates = _userTemplates
         .map((template) => json.encode(template.toJson()))
         .toList();
     await prefs.setStringList(_templatePrefsKey, userTemplates);
+  }
+
+  Future<void> _loadMaterialSuggestions() async {
+    try {
+      final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+      final names = <String>{};
+
+      final inventory = InventoryService(db.database);
+      final items = await inventory.getProjectInventory(widget.projectId);
+      for (final item in items) {
+        if (item.name.trim().isNotEmpty) names.add(item.name.trim());
+      }
+
+      final expenses = await db.getExpensesByProject(widget.projectId);
+      for (final e in expenses) {
+        final notes = e.notes?.trim() ?? '';
+        if (notes.isNotEmpty) {
+          // Saved as "MaterialName x 2 bags" or similar
+          final cut = notes.split(' · ').first;
+          final name = cut.split(' x ').first.trim();
+          if (name.isNotEmpty && name.length < 80) names.add(name);
+        }
+        if (e.category == ExpenseCategory.materials &&
+            e.merchant.trim().isNotEmpty &&
+            e.merchant.length < 40) {
+          // Merchant alone is not material; skip.
+        }
+      }
+
+      for (final t in _userTemplates) {
+        names.add(t.materialName.trim());
+      }
+
+      final sorted = names.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      if (!mounted) return;
+      setState(() {
+        _materialSuggestions = sorted;
+      });
+    } catch (_) {
+      // Suggestions are optional; entry still works fully offline.
+    }
+  }
+
+  Future<void> _refreshUnitSuggestions(String entryId, String materialName) async {
+    final suggestions = await SmartUnitSuggestionService.suggestUnitsForMaterial(
+      materialName,
+      limit: 5,
+    );
+    if (!mounted) return;
+    setState(() {
+      _unitSuggestionsByEntry[entryId] = suggestions;
+    });
+
+    final entry = _entries.cast<MaterialEntry?>().firstWhere(
+          (e) => e?.id == entryId,
+          orElse: () => null,
+        );
+    if (entry == null) return;
+    if (_userPickedUnitEntryIds.contains(entryId)) return;
+    if (suggestions.isEmpty) return;
+    // Only auto-apply when the line still looks untouched.
+    if (entry.quantity == 0 &&
+        entry.unitCost == 0 &&
+        (entry.unitId == _defaultMaterialUnitId ||
+            entry.unitId == 'u_kg' ||
+            entry.unitId.isEmpty)) {
+      _updateEntry(entryId, unitId: suggestions.first.id);
+    }
   }
 
   Future<void> _addTemplateFromEntry(String entryId) async {
@@ -187,8 +288,34 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     );
 
     setState(() {
-      _templates = [..._templates, template];
-      _duplicateHint = 'Template saved from ${entry.materialName.trim()}';
+      _userTemplates = [
+        template,
+        ..._userTemplates.where(
+          (t) =>
+              t.materialName.toLowerCase() !=
+              template.materialName.toLowerCase(),
+        ),
+      ];
+      _duplicateHint = 'Saved “${template.materialName}” for quick reuse';
+      if (!_materialSuggestions.any(
+        (n) => n.toLowerCase() == template.materialName.toLowerCase(),
+      )) {
+        _materialSuggestions = [..._materialSuggestions, template.materialName]
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      }
+    });
+    await _saveTemplates();
+  }
+
+  Future<void> _removeUserTemplate(_MaterialTemplate template) async {
+    setState(() {
+      _userTemplates = _userTemplates
+          .where(
+            (t) =>
+                t.materialName.toLowerCase() !=
+                template.materialName.toLowerCase(),
+          )
+          .toList();
     });
     await _saveTemplates();
   }
@@ -208,9 +335,11 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         materialName: template.materialName,
         unitId: template.unitId,
       );
+      _userPickedUnitEntryIds.add(blankEntry.id);
       _duplicateHint = null;
       _computeTotal();
     });
+    _refreshUnitSuggestions(blankEntry.id, template.materialName);
   }
 
   void _duplicateEntry(String entryId) {
@@ -299,6 +428,9 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
         _computeTotal();
       }
     });
+    if (materialName != null) {
+      _refreshUnitSuggestions(id, materialName);
+    }
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -935,11 +1067,14 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
   }
 
   Widget _buildTemplatesStrip(bool isDark) {
+    final templates = _allQuickTemplates;
+    final recent = _materialSuggestions.take(8).toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Templates — tap to prefill',
+          'Your materials & starters — tap to prefill · long-press saved ones to remove',
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
@@ -951,10 +1086,10 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           height: 42,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: _templates.length + 1,
+            itemCount: templates.length + 1,
             separatorBuilder: (_, __) => const SizedBox(width: 10),
             itemBuilder: (context, index) {
-              if (index == _templates.length) {
+              if (index == templates.length) {
                 return GestureDetector(
                   onTap: () {
                     if (_entries.isNotEmpty) {
@@ -968,7 +1103,6 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                       border: Border.all(
                         color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
                         width: 1,
-                        style: BorderStyle.solid,
                       ),
                     ),
                     child: Row(
@@ -980,7 +1114,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'Save template',
+                          'Save custom',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -993,13 +1127,32 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                 );
               }
 
-              final template = _templates[index];
+              final template = templates[index];
+              final isUserSaved = _userTemplates.any(
+                (t) =>
+                    t.materialName.toLowerCase() ==
+                    template.materialName.toLowerCase(),
+              );
               return GestureDetector(
                 onTap: () => _applyTemplate(template),
+                onLongPress: isUserSaved
+                    ? () async {
+                        await _removeUserTemplate(template);
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Removed “${template.materialName}”'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    : null,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                    color: isDark ? AppColors.darkCard : AppColors.lightBackground,
+                    color: isUserSaved
+                        ? AppColors.primary.withOpacity(0.12)
+                        : (isDark ? AppColors.darkCard : AppColors.lightBackground),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
@@ -1009,7 +1162,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
                   child: Row(
                     children: [
                       Icon(
-                        Icons.bolt_rounded,
+                        isUserSaved ? Icons.bookmark_rounded : Icons.bolt_rounded,
                         size: 14,
                         color: isDark ? AppColors.darkText : AppColors.lightText,
                       ),
@@ -1029,6 +1182,42 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
             },
           ),
         ),
+        if (recent.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Recent / inventory — type any custom name below',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: isDark ? AppColors.darkTextSecondary : AppColors.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: recent.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final name = recent[index];
+                return ActionChip(
+                  label: Text(name),
+                  onPressed: () {
+                    final blank = _entries.firstWhere(
+                      (e) => e.materialName.trim().isEmpty,
+                      orElse: () {
+                        _addNewEntry();
+                        return _entries.last;
+                      },
+                    );
+                    _updateEntry(blank.id, materialName: name);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1115,13 +1304,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
 
           const SizedBox(height: 16),
 
-          _buildTextField(
-            isDark: isDark,
-            label: 'Material name',
-            hint: 'e.g. Portland Cement',
-            initialValue: entry.materialName,
-            onChanged: (value) => _updateEntry(entry.id, materialName: value),
-          ),
+          _buildMaterialNameField(isDark, entry),
 
           const SizedBox(height: 16),
 
@@ -1174,6 +1357,41 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
               ),
             ],
           ),
+
+          if ((_unitSuggestionsByEntry[entry.id] ?? const []).isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                Text(
+                  'Suggested units:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AppColors.darkTextSecondary
+                        : AppColors.lightTextSecondary,
+                  ),
+                ),
+                ...(_unitSuggestionsByEntry[entry.id] ?? []).map((u) {
+                  final selected = entry.unitId == u.id;
+                  return ChoiceChip(
+                    label: Text(u.displayName),
+                    selected: selected,
+                    onSelected: (_) {
+                      _userPickedUnitEntryIds.add(entry.id);
+                      _updateEntry(entry.id, unitId: u.id);
+                      SmartUnitSuggestionService.recordUnitPreference(
+                        entry.materialName,
+                        u.name,
+                      );
+                    },
+                  );
+                }),
+              ],
+            ),
+          ],
 
           const SizedBox(height: 16),
 
@@ -1244,8 +1462,85 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
     );
   }
 
+  Widget _buildMaterialNameField(bool isDark, MaterialEntry entry) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(
+            'Material name (any custom name)',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: isDark ? AppColors.darkText : AppColors.lightText,
+            ),
+          ),
+        ),
+        Autocomplete<String>(
+          key: ValueKey('material_${entry.id}'),
+          initialValue: TextEditingValue(text: entry.materialName),
+          optionsBuilder: (textEditingValue) {
+            final q = textEditingValue.text.trim().toLowerCase();
+            if (q.isEmpty) {
+              return _materialSuggestions.take(12);
+            }
+            return _materialSuggestions
+                .where((n) => n.toLowerCase().contains(q))
+                .take(12);
+          },
+          onSelected: (value) {
+            _userPickedUnitEntryIds.remove(entry.id);
+            _updateEntry(entry.id, materialName: value);
+          },
+          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+            return TextField(
+              controller: controller,
+              focusNode: focusNode,
+              onChanged: (value) {
+                _userPickedUnitEntryIds.remove(entry.id);
+                _updateEntry(entry.id, materialName: value);
+              },
+              style: TextStyle(
+                color: isDark ? AppColors.darkText : AppColors.lightText,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Type anything — tiles, diesel, labour…',
+                hintStyle: TextStyle(
+                  color: isDark
+                      ? AppColors.darkTextTertiary
+                      : AppColors.lightTextTertiary,
+                ),
+                filled: true,
+                fillColor:
+                    isDark ? AppColors.darkBackground : AppColors.lightBackground,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  ),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                suffixIcon: const Icon(Icons.edit_rounded, size: 18),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _buildUnitDropdown(bool isDark, MaterialEntry entry) {
     final units = UnitService.sortedForDropdown();
+    final validIds = units.map((u) => u.id).toSet();
+    final currentId =
+        validIds.contains(entry.unitId) ? entry.unitId : _defaultMaterialUnitId;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1261,7 +1556,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           ),
         ),
         DropdownButtonFormField<String>(
-          value: entry.unitId,
+          value: currentId,
           isExpanded: true,
           decoration: InputDecoration(
             filled: true,
@@ -1286,7 +1581,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
               DropdownMenuItem(
                 value: u.id,
                 child: Text(
-                  u.displayName,
+                  '${u.displayName} (${u.category})',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: isDark ? AppColors.darkText : AppColors.lightText,
@@ -1297,6 +1592,7 @@ class _DailyMaterialEntryScreenState extends State<DailyMaterialEntryScreen> {
           ],
           onChanged: (v) {
             if (v == null) return;
+            _userPickedUnitEntryIds.add(entry.id);
             _updateEntry(entry.id, unitId: v);
             final u = UnitService.byId(v);
             if (u != null && entry.materialName.trim().isNotEmpty) {

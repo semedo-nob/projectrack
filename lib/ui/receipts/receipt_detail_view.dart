@@ -87,6 +87,33 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
     }
   }
 
+  Future<void> _setStatus(String status) async {
+    if (_expense == null) return;
+    final db = Provider.of<DriftDatabaseProvider>(context, listen: false);
+    final ok = await db.updateExpense(id: _expense!.id, status: status);
+    if (!mounted) return;
+    if (ok) {
+      await _loadReceiptData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            status == 'verified'
+                ? 'Receipt marked as verified'
+                : 'Receipt status updated',
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(db.error ?? 'Could not update status'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
   Future<void> _deleteReceipt() async {
     if (_expense == null) return;
 
@@ -325,6 +352,40 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                       ],
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  if (expense.status == ExpenseStatus.pendingReview ||
+                      expense.status == ExpenseStatus.pending ||
+                      expense.status == ExpenseStatus.logged)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: () => _setStatus('verified'),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.success,
+                            ),
+                            icon: const Icon(Icons.verified_rounded),
+                            label: const Text('Verify receipt'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _setStatus('rejected'),
+                            icon: const Icon(Icons.cancel_outlined),
+                            label: const Text('Reject'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  if (expense.status == ExpenseStatus.verified)
+                    Text(
+                      'This receipt has been verified.',
+                      style: TextStyle(
+                        color: AppColors.success,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   Text(
                     'Total Amount',

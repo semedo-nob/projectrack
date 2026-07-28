@@ -7,10 +7,12 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:projectrack1/database/database.dart' as drift_db;
 
+import '../constants/models/activity_model.dart';
 import '../constants/models/expense_model.dart';
 import '../constants/models/projects_model.dart';
 import '../constants/models/task_model.dart';
 import '../service/google_sync_service.dart';
+import '../service/notification_scheduler_service.dart';
 import '../themes/app_colors.dart';
 import 'dashboard_data.dart';
 
@@ -830,6 +832,168 @@ class DriftDatabaseProvider extends ChangeNotifier {
     }
   }
 
+  // ===== ACTIVITY LOG METHODS =====
+
+  Stream<List<ProjectActivity>> watchProjectActivities(String projectId) {
+    return _database.watchActivityLogs(projectId).map(
+      (rows) => rows.map(ProjectActivity.fromDrift).toList(),
+    );
+  }
+
+  Future<List<ProjectActivity>> getProjectActivities(String projectId) async {
+    try {
+      final rows = await _database.getActivityLogs(projectId);
+      return rows.map(ProjectActivity.fromDrift).toList();
+    } catch (e) {
+      _setError('Failed to load activities: $e');
+      return [];
+    }
+  }
+
+  Future<bool> createActivity({
+    required String id,
+    required String projectId,
+    required String title,
+    String? description,
+    required String activityType,
+    required DateTime occurredAt,
+    double? hoursSpent,
+    String? performedBy,
+    String? location,
+    String? linkedExpenseId,
+  }) async {
+    try {
+      final now = DateTime.now();
+      await _database.insertActivityLog(
+        drift_db.ActivityLogsCompanion.insert(
+          id: id,
+          projectId: projectId,
+          title: title,
+          description: drift.Value(description),
+          activityType: drift.Value(activityType),
+          occurredAt: occurredAt,
+          hoursSpent: drift.Value(hoursSpent),
+          performedBy: drift.Value(performedBy),
+          location: drift.Value(location),
+          linkedExpenseId: drift.Value(linkedExpenseId),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      await _triggerAutoBackup();
+      await NotificationSchedulerService.instance.refreshFromProvider(this);
+      return true;
+    } catch (e) {
+      _setError('Failed to create activity: $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteActivity(String id) async {
+    try {
+      await _database.deleteActivityLog(id);
+      await _triggerAutoBackup();
+      return true;
+    } catch (e) {
+      _setError('Failed to delete activity: $e');
+      return false;
+    }
+  }
+
+  // ===== MILESTONE METHODS =====
+
+  Stream<List<ProjectMilestone>> watchProjectMilestones(String projectId) {
+    return _database.watchMilestones(projectId).map(
+      (rows) => rows.map(ProjectMilestone.fromDrift).toList(),
+    );
+  }
+
+  Future<List<ProjectMilestone>> getProjectMilestones(String projectId) async {
+    try {
+      final rows = await _database.getMilestones(projectId);
+      return rows.map(ProjectMilestone.fromDrift).toList();
+    } catch (e) {
+      _setError('Failed to load milestones: $e');
+      return [];
+    }
+  }
+
+  Future<bool> createMilestone({
+    required String id,
+    required String projectId,
+    required String title,
+    String? description,
+    DateTime? dueDate,
+    int sortOrder = 0,
+  }) async {
+    try {
+      final now = DateTime.now();
+      await _database.insertMilestone(
+        drift_db.ProjectMilestonesCompanion.insert(
+          id: id,
+          projectId: projectId,
+          title: title,
+          description: drift.Value(description),
+          dueDate: drift.Value(dueDate),
+          sortOrder: drift.Value(sortOrder),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      await _triggerAutoBackup();
+      await NotificationSchedulerService.instance.refreshFromProvider(this);
+      return true;
+    } catch (e) {
+      _setError('Failed to create milestone: $e');
+      return false;
+    }
+  }
+
+  Future<bool> updateMilestoneStatus({
+    required String id,
+    required String status,
+  }) async {
+    try {
+      final existing = await _database.getMilestone(id);
+      if (existing == null) {
+        _setError('Milestone not found');
+        return false;
+      }
+      final now = DateTime.now();
+      await _database.updateMilestone(
+        drift_db.ProjectMilestonesCompanion(
+          id: drift.Value(existing.id),
+          projectId: drift.Value(existing.projectId),
+          title: drift.Value(existing.title),
+          description: drift.Value(existing.description),
+          dueDate: drift.Value(existing.dueDate),
+          status: drift.Value(status),
+          sortOrder: drift.Value(existing.sortOrder),
+          completedAt: drift.Value(status == 'done' ? now : null),
+          createdAt: drift.Value(existing.createdAt),
+          updatedAt: drift.Value(now),
+        ),
+      );
+      await _triggerAutoBackup();
+      await NotificationSchedulerService.instance.refreshFromProvider(this);
+      return true;
+    } catch (e) {
+      _setError('Failed to update milestone: $e');
+      return false;
+    }
+  }
+
+  Future<bool> deleteMilestone(String id) async {
+    try {
+      await _database.deleteMilestone(id);
+      await _triggerAutoBackup();
+      return true;
+    } catch (e) {
+      _setError('Failed to delete milestone: $e');
+      return false;
+    }
+  }
+
   // ===== PROJECT NOTIFICATIONS (real data) =====
 
   /// Builds notifications from project data: no budget set, 24h without log entry, over budget, tasks due soon.
@@ -878,18 +1042,28 @@ class DriftDatabaseProvider extends ChangeNotifier {
           );
         }
 
-        // 3) No log entry in the last 24 hours
+        // 3) No log entry in the last 24 hours (expenses or activity logs)
         final expenses = await getExpensesByProject(project.id);
-        final lastLogAt = expenses.isNotEmpty
-            ? expenses.map((e) => e.date).reduce((a, b) => a.isAfter(b) ? a : b)
-            : project.startDate;
+        final activities = await getProjectActivities(project.id);
+        DateTime lastLogAt = project.startDate;
+        if (expenses.isNotEmpty) {
+          lastLogAt = expenses
+              .map((e) => e.date)
+              .reduce((a, b) => a.isAfter(b) ? a : b);
+        }
+        if (activities.isNotEmpty) {
+          final lastActivity = activities
+              .map((a) => a.occurredAt)
+              .reduce((a, b) => a.isAfter(b) ? a : b);
+          if (lastActivity.isAfter(lastLogAt)) lastLogAt = lastActivity;
+        }
         if (now.difference(lastLogAt) >= twentyFourHours) {
           list.add(
             _notificationMap(
               type: 'activity',
               title: 'No recent activity',
               description:
-                  "No log entry in the last 24 hours for '${project.name}'.",
+                  "No activity or material log in the last 24 hours for '${project.name}'.",
               at: lastLogAt.add(twentyFourHours),
               projectId: project.id,
               projectName: project.name,
@@ -910,7 +1084,23 @@ class DriftDatabaseProvider extends ChangeNotifier {
               TaskStatus.fromString(task.status) == TaskStatus.done) {
             continue;
           }
-          if ((due.isAfter(todayStart) && due.isBefore(tomorrow)) ||
+          final dueDay = DateTime(due.year, due.month, due.day);
+          if (dueDay.isBefore(todayStart)) {
+            list.add(
+              _notificationMap(
+                type: 'task',
+                title: 'Overdue task',
+                description:
+                    "'${task.title}' in '${project.name}' was due ${_formatDue(due)}.",
+                at: due,
+                projectId: project.id,
+                projectName: project.name,
+                icon: Icons.event_busy_rounded,
+                iconColor: AppColors.error,
+                actionLabel: 'View Task',
+              ),
+            );
+          } else if ((due.isAfter(todayStart) && due.isBefore(tomorrow)) ||
               (due.year == now.year &&
                   due.month == now.month &&
                   due.day == now.day)) {
@@ -929,6 +1119,122 @@ class DriftDatabaseProvider extends ChangeNotifier {
               ),
             );
           }
+        }
+
+        // 5) Project behind schedule (endDate passed, not Done)
+        final end = project.endDate;
+        if (end != null &&
+            project.status.toLowerCase() != 'done' &&
+            project.status.toLowerCase() != 'completed') {
+          final endDay = DateTime(end.year, end.month, end.day);
+          if (endDay.isBefore(todayStart)) {
+            list.add(
+              _notificationMap(
+                type: 'schedule',
+                title: 'Behind schedule',
+                description:
+                    "'${project.name}' passed its end date (${end.day}/${end.month}/${end.year}).",
+                at: end,
+                projectId: project.id,
+                projectName: project.name,
+                icon: Icons.schedule_rounded,
+                iconColor: AppColors.error,
+                actionLabel: 'Review Project',
+              ),
+            );
+          } else if (!endDay.isAfter(todayStart.add(const Duration(days: 7)))) {
+            list.add(
+              _notificationMap(
+                type: 'schedule',
+                title: 'Deadline approaching',
+                description:
+                    "'${project.name}' ends ${_formatDue(end)}.",
+                at: end,
+                projectId: project.id,
+                projectName: project.name,
+                icon: Icons.flag_rounded,
+                iconColor: AppColors.warning,
+                actionLabel: 'Review Project',
+              ),
+            );
+          }
+        }
+
+        // 6) Overdue / due milestones
+        final milestones = await getProjectMilestones(project.id);
+        for (final m in milestones) {
+          if (m.status == MilestoneStatus.done || m.dueDate == null) continue;
+          final due = m.dueDate!;
+          final dueDay = DateTime(due.year, due.month, due.day);
+          if (dueDay.isBefore(todayStart)) {
+            list.add(
+              _notificationMap(
+                type: 'milestone',
+                title: 'Overdue milestone',
+                description:
+                    "'${m.title}' in '${project.name}' is overdue.",
+                at: due,
+                projectId: project.id,
+                projectName: project.name,
+                icon: Icons.flag_circle_rounded,
+                iconColor: AppColors.error,
+                actionLabel: 'View Schedule',
+              ),
+            );
+          } else if (!dueDay.isAfter(todayStart.add(const Duration(days: 2)))) {
+            list.add(
+              _notificationMap(
+                type: 'milestone',
+                title: 'Milestone due soon',
+                description:
+                    "'${m.title}' in '${project.name}' is due ${_formatDue(due)}.",
+                at: due,
+                projectId: project.id,
+                projectName: project.name,
+                icon: Icons.flag_rounded,
+                iconColor: AppColors.warning,
+                actionLabel: 'View Schedule',
+              ),
+            );
+          }
+        }
+
+        // 7) Receipts needing review / missing receipts
+        final pendingReview = expenses
+            .where((e) => e.status == ExpenseStatus.pendingReview)
+            .length;
+        if (pendingReview > 0) {
+          list.add(
+            _notificationMap(
+              type: 'receipt',
+              title: 'Receipts need review',
+              description:
+                  "$pendingReview receipt${pendingReview == 1 ? '' : 's'} in '${project.name}' need verification.",
+              at: now,
+              projectId: project.id,
+              projectName: project.name,
+              icon: Icons.rate_review_rounded,
+              iconColor: AppColors.warning,
+              actionLabel: 'Review',
+            ),
+          );
+        }
+        final missingReceipts = expenses.where((e) => !e.hasReceipt).length;
+        if (missingReceipts > 0) {
+          list.add(
+            _notificationMap(
+              type: 'receipt',
+              title: 'Missing receipts',
+              description:
+                  "$missingReceipts expense${missingReceipts == 1 ? '' : 's'} in '${project.name}' have no receipt attached.",
+              at: now.subtract(const Duration(minutes: 1)),
+              projectId: project.id,
+              projectName: project.name,
+              icon: Icons.receipt_long_rounded,
+              iconColor: AppColors.error,
+              actionLabel: 'Review',
+            ),
+          );
         }
       }
 

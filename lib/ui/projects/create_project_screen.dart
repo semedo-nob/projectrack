@@ -32,9 +32,10 @@ class _CreateProjectScreenState extends State<CreateProjectScreen> {
 
   static const List<String> _categoryOptions = [
     'General',
+    'Construction',
+    'Agriculture',
     'Development',
     'Marketing',
-    'Construction',
     'Events',
     'Other',
   ];

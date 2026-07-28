@@ -5,6 +5,7 @@ import 'package:projectrack1/providers/currency_provider.dart';
 import 'package:projectrack1/providers/drift_database_provider.dart';
 import 'package:projectrack1/providers/theme_provider.dart';
 import 'package:projectrack1/routes/app_routes.dart';
+import 'package:projectrack1/service/notification_scheduler_service.dart';
 import 'package:provider/provider.dart';
 import 'package:projectrack1/themes/app_theme.dart';
 
@@ -22,6 +23,16 @@ void main() async {
   currencyProvider.setDatabase(databaseProvider.database);
 
   final authProvider = AuthProvider(database: databaseProvider.database);
+
+  // OS reminders for budget / schedule / missing logs / receipts.
+  await NotificationSchedulerService.instance.initialize();
+  // Defer first schedule until after first frame when auth/user projects load.
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    try {
+      await NotificationSchedulerService.instance
+          .refreshFromProvider(databaseProvider);
+    } catch (_) {}
+  });
 
   runApp(
     MultiProvider(

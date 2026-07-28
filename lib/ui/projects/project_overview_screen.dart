@@ -1101,6 +1101,42 @@ class _ProjectOverviewScreenState extends State<ProjectOverviewScreen>
                 ),
               ),
               const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionButton(
+                  isDark: isDark,
+                  icon: Icons.event_note_rounded,
+                  color: AppColors.info,
+                  label: 'Activities',
+                  onTap: () => context.push(
+                    AppRoutes.projectActivities.replaceFirst(
+                      ':id',
+                      widget.projectId,
+                    ),
+                    extra: widget.projectName,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  isDark: isDark,
+                  icon: Icons.flag_rounded,
+                  color: AppColors.warning,
+                  label: 'Schedule',
+                  onTap: () => context.push(
+                    AppRoutes.projectSchedule.replaceFirst(
+                      ':id',
+                      widget.projectId,
+                    ),
+                    extra: widget.projectName,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
               const Expanded(child: SizedBox()),
             ],
           ),

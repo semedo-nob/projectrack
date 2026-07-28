@@ -62,4 +62,22 @@ abstract final class EnterpriseUi {
       ),
     );
   }
+
+  /// Circular primary FAB — matches receipt gallery; avoids extended FABs
+  /// which clash with the app's CircleBorder FAB theme.
+  static Widget primaryFab({
+    required VoidCallback onPressed,
+    required IconData icon,
+    required String tooltip,
+  }) {
+    return FloatingActionButton(
+      onPressed: onPressed,
+      tooltip: tooltip,
+      backgroundColor: AppColors.primary,
+      foregroundColor: Colors.white,
+      elevation: 3,
+      shape: const CircleBorder(),
+      child: Icon(icon, size: 26),
+    );
+  }
 }
